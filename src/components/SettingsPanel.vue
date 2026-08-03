@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { fetchStatus, fetchSettings, saveSettings, testEmail, triggerMonitor, changePassword } from '../api/monitor'
 
-const form = ref({ smtp_host: '', smtp_port: '465', smtp_user: '', smtp_pass: '', recipients: '', mail_subject_template: '', mail_body_template: '', spread_alert_enabled: false, spread_alert_threshold: 30, spread_watchlist: '' })
+const form = ref({ smtp_host: '', smtp_port: '465', smtp_user: '', smtp_pass: '', recipients: '', spread_alert_enabled: false, spread_alert_threshold: 30, spread_watchlist: '' })
 const pwd = ref({ old_password: '', new_password: '', confirm: '' })
 const status = ref(null)
 const saving = ref(false)
@@ -25,8 +25,6 @@ async function load() {
       form.value.smtp_user = se.smtp_user || ''
       form.value.smtp_pass = ''
       form.value.recipients = se.recipients || ''
-      form.value.mail_subject_template = se.mail_subject_template || ''
-      form.value.mail_body_template = se.mail_body_template || ''
       form.value.spread_alert_enabled = se.spread_alert_enabled === '1'
       form.value.spread_alert_threshold = Number(se.spread_alert_threshold) || 30
       form.value.spread_watchlist = se.spread_watchlist || ''
@@ -125,17 +123,6 @@ onMounted(load)
           <button class="btn primary" :disabled="saving" @click="onSave">{{ saving ? '保存中…' : '保存设置' }}</button>
           <button class="btn" :disabled="testing" @click="onTest">{{ testing ? '发送中…' : '发送测试邮件' }}</button>
         </div>
-      </div>
-
-      <div class="card">
-        <h3>邮件模板</h3>
-        <label>主题模板
-          <input v-model="form.mail_subject_template" placeholder="如 【币安上新】{symbol} 今日上线" />
-        </label>
-        <label>正文模板（支持 HTML）
-          <textarea v-model="form.mail_body_template" class="tpl" rows="4" placeholder="&lt;p&gt;&lt;b&gt;{title}&lt;/b&gt;&lt;/p&gt;&lt;p&gt;上线日期：{date}&lt;/p&gt;&lt;p&gt;监控时间：{time}&lt;/p&gt;"></textarea>
-        </label>
-        <p class="tpl-hint">可用占位符：{symbol} {title} {date} {time}（留空则用默认模板）</p>
       </div>
 
       <div class="card">

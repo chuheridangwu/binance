@@ -1,6 +1,6 @@
 import { db, getSetting, setSetting } from './db.js'
 import { getExchangeInfo, getFirstKlineTime, fetchListingAnnouncements } from './binance.js'
-import { sendMail, sendListingMail } from './mailer.js'
+import { sendMail } from './mailer.js'
 import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 
 const state = {
@@ -30,8 +30,13 @@ function isSameDay(a, b) {
 async function notify(listing) {
   const up = db.prepare('SELECT notified FROM listings WHERE code = ?').get(listing.code)
   if (up?.notified) return
+  const display = listing.title ? listing.title : `币安新上线：${listing.symbol}`
+  const dateStr = new Date(listing.date).toISOString().slice(0, 10)
   try {
-    const to = await sendListingMail(listing)
+    const to = await sendMail(
+      `【币安上新】${listing.symbol} 今日上线`,
+      `<p><b>${display}</b></p><p>上线日期：${dateStr}</p><p>监控时间：${new Date().toLocaleString('zh-CN')}</p>`
+    )
     db.prepare('UPDATE listings SET notified = 1 WHERE code = ?').run(listing.code)
     state.lastEmailAt = Date.now()
     state.lastEmailTo = to

@@ -125,7 +125,6 @@ app.get('/api/settings', (_req, res) => {
 app.post('/api/settings', (req, res) => {
   const fields = [
     'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'recipients',
-    'mail_subject_template', 'mail_body_template',
     'spread_alert_enabled', 'spread_alert_threshold', 'spread_watchlist',
   ]
   for (const f of fields) {

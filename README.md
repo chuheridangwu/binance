@@ -9,7 +9,6 @@
 - **套利监控**：永续/现货价差 + 当前资金费率 + 年化资金费率，一键刷新、点击跳行情；超过阈值自动邮件提醒（每 5 分钟扫描，每币每天一次）
 - **月度上新统计**：统计卡片（总/今年/本月/近30天）、每月上币量柱状图、上新高峰 Top5、年度对比，点击可直接跳转图表
 - **新币监控**：后端每 60 秒对比合约交易对清单，发现新上币自动通过 SMTP 发邮件；同时每天拉取币安官方公告补全数据
-- **邮件模板**：主题/正文支持 HTML 模板与占位符 {symbol} {title} {date} {time}
 - **登录保护**：所有接口需 token，设置页可修改密码
 
 ## 技术栈
@@ -44,7 +43,7 @@ binance/
 │       ├── KlineChart.vue        # 行情图表（OHLC 头、成交量、可自定义指标、十字线）
 │       ├── SpreadPanel.vue       # 套利监控面板
 │       ├── ListingsStats.vue     # 月度上新统计 + 可视化
-│       └── SettingsPanel.vue     # SMTP 设置、邮件模板、套利提醒、监控状态、修改密码
+│       └── SettingsPanel.vue     # SMTP 设置、套利提醒、监控状态、修改密码
 ├── Dockerfile                    # 多阶段构建（node:24-alpine）
 ├── docker-compose.yml            # 1Panel / Docker Compose 部署配置
 ├── deploy.sh                     # 服务器部署脚本（pull + 重建容器）

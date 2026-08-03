@@ -1,0 +1,89 @@
+<script setup>
+import KlineChart from './components/KlineChart.vue'
+import ListingsStats from './components/ListingsStats.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
+import { store } from './store'
+</script>
+
+<template>
+  <div class="app">
+    <header class="header">
+      <div class="logo">
+        <span class="logo-mark">B</span>
+        <span class="logo-text">币安监控面板</span>
+      </div>
+      <nav class="tabs">
+        <button :class="{ active: store.activeTab === 'chart' }" @click="store.activeTab = 'chart'">行情图表</button>
+        <button :class="{ active: store.activeTab === 'stats' }" @click="store.activeTab = 'stats'">月度上新统计</button>
+        <button :class="{ active: store.activeTab === 'settings' }" @click="store.activeTab = 'settings'">监控设置</button>
+      </nav>
+    </header>
+    <main class="main">
+      <KlineChart v-show="store.activeTab === 'chart'" />
+      <ListingsStats v-show="store.activeTab === 'stats'" />
+      <SettingsPanel v-show="store.activeTab === 'settings'" />
+    </main>
+  </div>
+</template>
+
+<style scoped>
+.app {
+  min-height: 100vh;
+  background: #0b0e11;
+}
+.header {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  padding: 0 24px;
+  height: 56px;
+  background: #161a1e;
+  border-bottom: 1px solid #2b3139;
+}
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.logo-mark {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  background: #f0b90b;
+  color: #0b0e11;
+  font-weight: 800;
+  border-radius: 6px;
+}
+.logo-text {
+  font-weight: 600;
+  color: #eaecef;
+}
+.tabs {
+  display: flex;
+  gap: 8px;
+}
+.tabs button {
+  border: none;
+  background: transparent;
+  color: #848e9c;
+  font-size: 14px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tabs button:hover {
+  color: #eaecef;
+  background: #1e2329;
+}
+.tabs button.active {
+  color: #f0b90b;
+  background: #1e2329;
+}
+.main {
+  padding: 16px 24px 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+</style>

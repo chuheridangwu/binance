@@ -1,0 +1,11 @@
+services:
+  binance-monitor:
+    build: .
+    container_name: binance-monitor
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai

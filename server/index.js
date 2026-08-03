@@ -7,6 +7,7 @@ import * as binance from './binance.js'
 import * as monitor from './monitor.js'
 import { sendMail } from './mailer.js'
 import * as auth from './auth.js'
+import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -69,6 +70,20 @@ app.get('/api/search', async (req, res) => {
   }
 })
 
+app.get('/api/spread', async (req, res) => {
+  try {
+    const q = String(req.query.symbols || '')
+    const symbols = q
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    const data = symbols.length ? await getSpreadData(symbols) : await getSpreadData(DEFAULT_WATCH)
+    res.json(data)
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
+})
+
 app.get('/api/listings', (_req, res) => {
   const twoYearsAgo = Date.now() - 730 * 24 * 3600 * 1000
   const rows = db
@@ -103,11 +118,16 @@ app.get('/api/status', (_req, res) => {
 app.get('/api/settings', (_req, res) => {
   const s = getSettings()
   if (s.smtp_pass) s.smtp_pass = '***已设置***'
+  if (s.admin_pass) delete s.admin_pass
   res.json(s)
 })
 
 app.post('/api/settings', (req, res) => {
-  const fields = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'recipients']
+  const fields = [
+    'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'recipients',
+    'mail_subject_template', 'mail_body_template',
+    'spread_alert_enabled', 'spread_alert_threshold', 'spread_watchlist',
+  ]
   for (const f of fields) {
     if (req.body[f] !== undefined) {
       if (f === 'smtp_pass' && String(req.body[f]).trim() === '') continue

@@ -5,8 +5,11 @@
 ## 功能
 
 - **行情图表**：日/周/月/时 K 线，成交量、RSI、MACD 指标，历史数据懒加载
-- **月度上新统计**：按月份展示币安 U 本位合约新上线的交易对，可直接点击跳转图表
+- **指标参数自定义**：RSI 周期、MACD 快/慢/信号线、EMA 周期均可在工具栏直接改
+- **套利监控**：永续/现货价差 + 当前资金费率 + 年化资金费率，一键刷新、点击跳行情；超过阈值自动邮件提醒（每 5 分钟扫描，每币每天一次）
+- **月度上新统计**：统计卡片（总/今年/本月/近30天）、每月上币量柱状图、上新高峰 Top5、年度对比，点击可直接跳转图表
 - **新币监控**：后端每 60 秒对比合约交易对清单，发现新上币自动通过 SMTP 发邮件；同时每天拉取币安官方公告补全数据
+- **邮件模板**：主题/正文支持 HTML 模板与占位符 {symbol} {title} {date} {time}
 - **登录保护**：所有接口需 token，设置页可修改密码
 
 ## 技术栈
@@ -25,7 +28,8 @@ binance/
 │   ├── db.js                     # node:sqlite，listings / settings 表
 │   ├── auth.js                   # 登录：密码加盐哈希、token 签发与校验、改密码
 │   ├── binance.js                # 服务端直连币安（现货/合约 K 线、交易对清单、公告）
-│   ├── monitor.js                # 新币监控：轮询 + 公告补全 + 发信状态
+│   ├── spread.js                 # 套利数据：永续资金费率 + 现货/永续价差计算
+│   ├── monitor.js                # 新币监控 + 套利提醒：轮询、公告补全、发信状态
 │   └── mailer.js                 # SMTP 发信，配置从 settings 表读取
 ├── src/                          # Vue 3 前端
 │   ├── main.js                   # 入口
@@ -37,9 +41,10 @@ binance/
 │   │   └── binance.js            # K 线与搜索 API
 │   └── components/
 │       ├── Login.vue             # 登录页
-│       ├── KlineChart.vue        # 行情图表（OHLC 头、成交量、指标、十字线）
-│       ├── ListingsStats.vue     # 月度上新统计
-│       └── SettingsPanel.vue     # SMTP 设置、监控状态、修改密码
+│       ├── KlineChart.vue        # 行情图表（OHLC 头、成交量、可自定义指标、十字线）
+│       ├── SpreadPanel.vue       # 套利监控面板
+│       ├── ListingsStats.vue     # 月度上新统计 + 可视化
+│       └── SettingsPanel.vue     # SMTP 设置、邮件模板、套利提醒、监控状态、修改密码
 ├── Dockerfile                    # 多阶段构建（node:24-alpine）
 ├── docker-compose.yml            # 1Panel / Docker Compose 部署配置
 ├── deploy.sh                     # 服务器部署脚本（pull + 重建容器）

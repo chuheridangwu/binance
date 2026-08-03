@@ -11,17 +11,7 @@ const INTERVALS = [
   { label: '4H', value: '4h' },
   { label: '1D', value: '1d' },
 ]
-const RSI_PERIODS = [2, 7, 14, 21, 30]
-const MACD_PRESETS = [
-  { label: '12, 26, 9', fast: 12, slow: 26, signal: 9 },
-  { label: '8, 17, 9', fast: 8, slow: 17, signal: 9 },
-  { label: '5, 35, 5', fast: 5, slow: 35, signal: 5 },
-]
-const EMA_DEFS = [
-  { p: 7, color: '#f0b90b' },
-  { p: 25, color: '#f6465d' },
-  { p: 99, color: '#2d95ff' },
-]
+const EMA_COLORS = ['#f0b90b', '#f6465d', '#2d95ff', '#9747ff', '#0ecb81', '#e5a13a']
 
 const UP = '#0ecb81'
 const DOWN = '#f6465d'
@@ -38,6 +28,7 @@ const error = ref('')
 const showEma = ref(true)
 const showMacd = ref(true)
 const showRsi = ref(true)
+const emaText = ref('7,25,99')
 const rsiPeriod = ref(14)
 const macdFast = ref(12)
 const macdSlow = ref(26)
@@ -45,6 +36,13 @@ const macdSignal = ref(9)
 const suggestions = ref([])
 const lastBar = ref(null)
 const hovered = ref(null)
+
+const emaPeriods = computed(() =>
+  emaText.value
+    .split(/[,，\s]+/)
+    .map((s) => parseInt(s, 10))
+    .filter((n) => Number.isFinite(n) && n > 0)
+)
 
 const shown = computed(() => hovered.value || lastBar.value)
 const shownUp = computed(() => (shown.value ? shown.value.close >= shown.value.open : true))
@@ -246,11 +244,12 @@ function renderIndicators(closes) {
   }
 
   if (showEma.value) {
-    EMA_DEFS.forEach((d) => {
-      if (!ind[`ema${d.p}`]) {
-        ind[`ema${d.p}`] = { owner: mainChart, series: mainChart.addLineSeries({ color: d.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }) }
+    emaPeriods.value.forEach((p, i) => {
+      const key = `ema${p}`
+      if (!ind[key]) {
+        ind[key] = { owner: mainChart, series: mainChart.addLineSeries({ color: EMA_COLORS[i % EMA_COLORS.length], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }) }
       }
-      ind[`ema${d.p}`].series.setData(ema(closes, d.p).map((v, i) => ({ time: base[i].time, value: v })).filter((p) => p.value))
+      ind[key].series.setData(ema(closes, p).map((v, i) => ({ time: base[i].time, value: v })).filter((pt) => pt.value))
     })
   }
 }
@@ -393,7 +392,7 @@ onBeforeUnmount(() => {
 })
 
 watch([showEma, showMacd, showRsi], () => nextTick(reload))
-watch([rsiPeriod, macdFast, macdSlow, macdSignal], refreshIndicators)
+watch([rsiPeriod, macdFast, macdSlow, macdSignal, emaText], refreshIndicators)
 watch(
   () => store.chartSymbol,
   (s) => {
@@ -434,20 +433,19 @@ watch(
 
       <div class="ind-group">
         <label class="check"><input v-model="showEma" type="checkbox" /> EMA</label>
+        <input v-model="emaText" class="num" title="EMA 周期，逗号分隔，如 7,25,99" @change="refreshIndicators" />
       </div>
 
       <div class="ind-group">
         <label class="check"><input v-model="showMacd" type="checkbox" /> MACD</label>
-        <select v-model.number="macdFast" class="sel">
-          <option v-for="p in MACD_PRESETS" :key="p.label" :value="p.fast">{{ p.label }}</option>
-        </select>
+        <input v-model.number="macdFast" type="number" class="num" min="1" max="100" title="快线周期" @change="refreshIndicators" />
+        <input v-model.number="macdSlow" type="number" class="num" min="1" max="200" title="慢线周期" @change="refreshIndicators" />
+        <input v-model.number="macdSignal" type="number" class="num" min="1" max="50" title="信号周期" @change="refreshIndicators" />
       </div>
 
       <div class="ind-group">
         <label class="check"><input v-model="showRsi" type="checkbox" /> RSI</label>
-        <select v-model.number="rsiPeriod" class="sel">
-          <option v-for="p in RSI_PERIODS" :key="p" :value="p">{{ p }}</option>
-        </select>
+        <input v-model.number="rsiPeriod" type="number" class="num" min="2" max="100" title="RSI 周期" @change="refreshIndicators" />
       </div>
     </div>
 
@@ -585,6 +583,25 @@ watch(
   border-radius: 4px;
   outline: none;
   cursor: pointer;
+}
+.num {
+  width: 46px;
+  background: #2b3139;
+  border: 1px solid #2b3139;
+  color: #eaecef;
+  font-size: 12px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  outline: none;
+  text-align: center;
+}
+.num:focus {
+  border-color: #f0b90b;
+}
+input[type='number'].num::-webkit-outer-spin-button,
+input[type='number'].num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .ohlc-bar {
   display: flex;

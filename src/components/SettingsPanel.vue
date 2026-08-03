@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { fetchStatus, fetchSettings, saveSettings, testEmail, triggerMonitor, changePassword } from '../api/monitor'
 
-const form = ref({ smtp_host: '', smtp_port: '465', smtp_user: '', smtp_pass: '', recipients: '' })
+const form = ref({ smtp_host: '', smtp_port: '465', smtp_user: '', smtp_pass: '', recipients: '', mail_subject_template: '', mail_body_template: '', spread_alert_enabled: false, spread_alert_threshold: 30, spread_watchlist: '' })
 const pwd = ref({ old_password: '', new_password: '', confirm: '' })
 const status = ref(null)
 const saving = ref(false)
@@ -25,6 +25,11 @@ async function load() {
       form.value.smtp_user = se.smtp_user || ''
       form.value.smtp_pass = ''
       form.value.recipients = se.recipients || ''
+      form.value.mail_subject_template = se.mail_subject_template || ''
+      form.value.mail_body_template = se.mail_body_template || ''
+      form.value.spread_alert_enabled = se.spread_alert_enabled === '1'
+      form.value.spread_alert_threshold = Number(se.spread_alert_threshold) || 30
+      form.value.spread_watchlist = se.spread_watchlist || ''
       settingsLoaded.value = true
     }
   } catch (e) {
@@ -36,7 +41,8 @@ async function onSave() {
   saving.value = true
   show('', '')
   try {
-    await saveSettings(form.value)
+    const payload = { ...form.value, spread_alert_enabled: form.value.spread_alert_enabled ? '1' : '0' }
+    await saveSettings(payload)
     await load()
     show('ok', '设置已保存')
   } catch (e) {
@@ -119,6 +125,29 @@ onMounted(load)
           <button class="btn primary" :disabled="saving" @click="onSave">{{ saving ? '保存中…' : '保存设置' }}</button>
           <button class="btn" :disabled="testing" @click="onTest">{{ testing ? '发送中…' : '发送测试邮件' }}</button>
         </div>
+      </div>
+
+      <div class="card">
+        <h3>邮件模板</h3>
+        <label>主题模板
+          <input v-model="form.mail_subject_template" placeholder="如 【币安上新】{symbol} 今日上线" />
+        </label>
+        <label>正文模板（支持 HTML）
+          <textarea v-model="form.mail_body_template" class="tpl" rows="4" placeholder="&lt;p&gt;&lt;b&gt;{title}&lt;/b&gt;&lt;/p&gt;&lt;p&gt;上线日期：{date}&lt;/p&gt;&lt;p&gt;监控时间：{time}&lt;/p&gt;"></textarea>
+        </label>
+        <p class="tpl-hint">可用占位符：{symbol} {title} {date} {time}（留空则用默认模板）</p>
+      </div>
+
+      <div class="card">
+        <h3>套利提醒</h3>
+        <label class="check"><input v-model="form.spread_alert_enabled" type="checkbox" /> 启用资金费率/价差邮件提醒</label>
+        <label>年化资金费率阈值（%，超过才提醒）
+          <input v-model.number="form.spread_alert_threshold" type="number" min="1" placeholder="如 30" />
+        </label>
+        <label>监控交易对（逗号分隔，留空用默认 Top12）
+          <input v-model="form.spread_watchlist" placeholder="BTCUSDT, ETHUSDT, SOLUSDT" />
+        </label>
+        <p class="tpl-hint">每 5 分钟扫描一次，同一币种每天最多提醒一次。正费率=多头付空头，负费率=空头付多头。</p>
       </div>
 
       <div class="card">
@@ -221,6 +250,40 @@ input {
 }
 input:focus {
   border-color: #f0b90b;
+}
+textarea.tpl {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  background: #1e2329;
+  border: 1px solid #2b3139;
+  border-radius: 6px;
+  color: #eaecef;
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: 'SF Mono', Menlo, monospace;
+}
+textarea.tpl:focus {
+  border-color: #f0b90b;
+}
+.tpl-hint {
+  margin: 8px 0 0;
+  color: #5e6673;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #eaecef;
+  cursor: pointer;
+}
+.check input {
+  accent-color: #f0b90b;
 }
 .actions {
   display: flex;

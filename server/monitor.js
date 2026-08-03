@@ -1,10 +1,12 @@
 import { db, getSetting, setSetting } from './db.js'
 import { getExchangeInfo, getFirstKlineTime, fetchListingAnnouncements } from './binance.js'
-import { sendMail } from './mailer.js'
+import { sendMail, sendListingMail } from './mailer.js'
+import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 
 const state = {
   lastCheck: 0,
   lastAnnouncementScan: 0,
+  lastSpreadScan: 0,
   lastEmailAt: 0,
   lastEmailTo: [],
   totalListings: 0,
@@ -28,13 +30,8 @@ function isSameDay(a, b) {
 async function notify(listing) {
   const up = db.prepare('SELECT notified FROM listings WHERE code = ?').get(listing.code)
   if (up?.notified) return
-  const display = listing.title ? listing.title : `币安新上线：${listing.symbol}`
-  const dateStr = new Date(listing.date).toISOString().slice(0, 10)
   try {
-    const to = await sendMail(
-      `【币安上新】${listing.symbol} 今日上线`,
-      `<p><b>${display}</b></p><p>上线日期：${dateStr}</p><p>监控时间：${new Date().toLocaleString('zh-CN')}</p>`
-    )
+    const to = await sendListingMail(listing)
     db.prepare('UPDATE listings SET notified = 1 WHERE code = ?').run(listing.code)
     state.lastEmailAt = Date.now()
     state.lastEmailTo = to
@@ -88,6 +85,48 @@ async function scanMarketDiff() {
   }
 }
 
+async function scanSpreads() {
+  if (getSetting('spread_alert_enabled') !== '1') return
+  const threshold = Number(getSetting('spread_alert_threshold') || 30)
+  const watch = (getSetting('spread_watchlist') || '').split(/[,，\s]+/).filter(Boolean)
+  const syms = watch.length ? watch : DEFAULT_WATCH
+
+  let data
+  try {
+    data = await getSpreadData(syms)
+  } catch (e) {
+    state.scanErrors.push(`价差监控失败: ${e.message}`)
+    state.scanErrors = state.scanErrors.slice(-20)
+    return
+  }
+  state.lastSpreadScan = Date.now()
+
+  const today = new Date().toISOString().slice(0, 10)
+  for (const r of data.rows) {
+    if (Math.abs(r.annualized) < threshold) continue
+    const key = `spread_notify_${r.symbol}`
+    if (getSetting(key) === today) continue
+    try {
+      await sendMail(
+        `【套利提醒】${r.symbol} 年化资金费率 ${r.annualized}%`,
+        `<p><b>${r.symbol}</b> 出现高资金费率机会</p>` +
+          `<p>永续价格：${r.futuresPrice ?? '—'}</p>` +
+          `<p>现货价格：${r.spotPrice ?? '—'}</p>` +
+          `<p>永续溢价：${r.premiumPct ?? '—'}%</p>` +
+          `<p>当前资金费率：${r.fundingRate}%</p>` +
+          `<p>年化资金费率：<b>${r.annualized}%</b>（阈值 ${threshold}%）</p>` +
+          `<p>下次结算：${new Date(r.nextFundingTime).toLocaleString('zh-CN')}</p>` +
+          `<p>提醒时间：${new Date().toLocaleString('zh-CN')}</p>`
+      )
+      setSetting(key, today)
+      state.lastEmailAt = Date.now()
+      state.lastEmailTo = (getSetting('recipients') || '').split(/[,;，；\s]+/).filter(Boolean)
+    } catch (e) {
+      console.error(`[mail] 套利提醒发送失败(${r.symbol}):`, e.message)
+    }
+  }
+}
+
 export async function runOnce() {
   if (state.running) return
   state.running = true
@@ -95,6 +134,9 @@ export async function runOnce() {
     await scanMarketDiff()
     if (Date.now() - state.lastAnnouncementScan > 30 * 60 * 1000) {
       await scanAnnouncements()
+    }
+    if (Date.now() - state.lastSpreadScan > 5 * 60 * 1000) {
+      await scanSpreads()
     }
   } finally {
     state.lastCheck = Date.now()

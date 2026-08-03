@@ -51,3 +51,8 @@ export function testEmail() {
 export function triggerMonitor() {
   return api('/api/monitor/run', { method: 'POST' })
 }
+
+export function fetchSpread(symbols) {
+  const q = symbols.join(',')
+  return api(`/api/spread?symbols=${encodeURIComponent(q)}`)
+}

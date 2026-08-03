@@ -9,4 +9,6 @@ services:
       - ./data:/app/data
     environment:
       - TZ=Asia/Shanghai
-      - ADMIN_PASS=改成你自己的登录密码
+      # 仅首次启动时用作初始密码；留空则自动生成（写入 data/INITIAL_PASSWORD.txt）。
+      # 之后一律以页面「监控设置 → 修改登录密码」为准，重启不会覆盖。
+      - ADMIN_PASS=

@@ -120,6 +120,8 @@ function removeIndicatorSeries() {
 
 function initCharts() {
   removeIndicatorSeries()
+  macdByTime = new Map()
+  rsiByTime = new Map()
   charts.forEach((c) => c.remove())
   charts = []
   mainChart = null
@@ -186,12 +188,12 @@ function onCrosshair(kind, param) {
     if (k) mainChart.setCrosshairPosition(k.close, time, candleSeries)
     else mainChart.clearCrosshairPosition()
   }
-  if (kind !== 'macd' && macdChart) {
+  if (kind !== 'macd' && macdChart && ind.macdHist && ind.macdHist.series) {
     const v = macdByTime.get(time)
     if (v !== undefined) macdChart.setCrosshairPosition(v, time, ind.macdHist.series)
     else macdChart.clearCrosshairPosition()
   }
-  if (kind !== 'rsi' && rsiChart) {
+  if (kind !== 'rsi' && rsiChart && ind.rsi && ind.rsi.series) {
     const v = rsiByTime.get(time)
     if (v !== undefined) rsiChart.setCrosshairPosition(v, time, ind.rsi.series)
     else rsiChart.clearCrosshairPosition()

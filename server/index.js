@@ -120,8 +120,10 @@ app.post('/api/settings', (req, res) => {
 app.post('/api/test-email', async (_req, res) => {
   try {
     const to = await sendMail('【测试】币安上新监控邮件配置', '<p>SMTP 配置正常，测试邮件发送成功。</p>')
+    console.log(`[mail] 测试邮件发送成功 → ${to.join(', ')}`)
     res.json({ ok: true, to })
   } catch (e) {
+    console.error('[mail] 测试邮件发送失败:', e.message)
     res.status(400).json({ error: e.message })
   }
 })

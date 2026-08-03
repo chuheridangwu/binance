@@ -39,6 +39,7 @@ async function notify(listing) {
     state.lastEmailAt = Date.now()
     state.lastEmailTo = to
   } catch (e) {
+    console.error(`[mail] 发送邮件失败(${listing.symbol}):`, e.message)
     state.scanErrors.push(`发送邮件失败(${listing.symbol}): ${e.message}`)
     state.scanErrors = state.scanErrors.slice(-20)
   }

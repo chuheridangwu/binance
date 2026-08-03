@@ -74,9 +74,10 @@ bash deploy.sh
 
 ### 登录密码
 
-- 首次登录密码：若 docker-compose.yml 未设置 `ADMIN_PASS`，会自动生成并写入 `data/INITIAL_PASSWORD.txt`
-- 建议在 `docker-compose.yml` 的 `environment.ADMIN_PASS` 中预置自定义密码
-- 登录后可在页面「监控设置 → 修改登录密码」中更换
+- **推荐方式**：在 `docker-compose.yml` 的 `environment.ADMIN_PASS` 中设置密码。`ADMIN_PASS` 每次容器启动都会生效（优先级最高），改它 + 重建容器即可换密码
+- **兜底方式**：不设置 `ADMIN_PASS` 时，首次启动自动生成随机密码并写入 `data/INITIAL_PASSWORD.txt`
+- 登录后也可在页面「监控设置 → 修改登录密码」中更换（注意：只要 compose 里还留着 `ADMIN_PASS`，下次重建容器会用它的值覆盖页面改的密码，二选一保持一致）
+- 换密码后需**重建容器**才生效：`docker compose up -d`（`restart` 不会重新读取环境变量）
 
 ### 配置 SMTP 邮件
 

@@ -27,18 +27,18 @@ function verifyPass(pw, stored) {
 }
 
 export function initAdminPass() {
-  if (getSetting('admin_pass')) return
-  let pw = process.env.ADMIN_PASS
-  let source = 'ADMIN_PASS 环境变量'
-  if (!pw) {
-    pw = crypto.randomBytes(6).toString('base64url')
-    source = '自动生成'
-    try {
-      fs.writeFileSync(path.join(dataDir, 'INITIAL_PASSWORD.txt'), `初始登录密码: ${pw}\n登录后请在「监控设置 → 修改登录密码」中更换\n`)
-    } catch {}
+  if (process.env.ADMIN_PASS) {
+    setSetting('admin_pass', hashPass(process.env.ADMIN_PASS))
+    console.log('[auth] 已应用 ADMIN_PASS 环境变量中的登录密码')
+    return
   }
+  if (getSetting('admin_pass')) return
+  const pw = crypto.randomBytes(6).toString('base64url')
+  try {
+    fs.writeFileSync(path.join(dataDir, 'INITIAL_PASSWORD.txt'), `初始登录密码: ${pw}\n登录后请在「监控设置 → 修改登录密码」中更换\n`)
+  } catch {}
   setSetting('admin_pass', hashPass(pw))
-  console.log(`[auth] 初始登录密码已设置（${source}），可在 data/INITIAL_PASSWORD.txt 查看`)
+  console.log('[auth] 初始登录密码已自动生成，可在 data/INITIAL_PASSWORD.txt 查看')
 }
 
 export function login(password) {

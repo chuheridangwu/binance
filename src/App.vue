@@ -1,28 +1,53 @@
 <script setup>
+import { onMounted } from 'vue'
 import KlineChart from './components/KlineChart.vue'
 import ListingsStats from './components/ListingsStats.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
-import { store } from './store'
+import Login from './components/Login.vue'
+import { store, setAuthed } from './store'
+import { authStatus, logout } from './api/monitor'
+
+async function onLogout() {
+  try {
+    await logout()
+  } catch {}
+  setAuthed(false)
+}
+
+onMounted(async () => {
+  if (store.token) {
+    try {
+      const r = await authStatus()
+      setAuthed(r.authed)
+    } catch {
+      setAuthed(false)
+    }
+  }
+})
 </script>
 
 <template>
   <div class="app">
-    <header class="header">
-      <div class="logo">
-        <span class="logo-mark">B</span>
-        <span class="logo-text">币安监控面板</span>
-      </div>
-      <nav class="tabs">
-        <button :class="{ active: store.activeTab === 'chart' }" @click="store.activeTab = 'chart'">行情图表</button>
-        <button :class="{ active: store.activeTab === 'stats' }" @click="store.activeTab = 'stats'">月度上新统计</button>
-        <button :class="{ active: store.activeTab === 'settings' }" @click="store.activeTab = 'settings'">监控设置</button>
-      </nav>
-    </header>
-    <main class="main">
-      <KlineChart v-show="store.activeTab === 'chart'" />
-      <ListingsStats v-show="store.activeTab === 'stats'" />
-      <SettingsPanel v-show="store.activeTab === 'settings'" />
-    </main>
+    <Login v-if="!store.authed" />
+    <template v-else>
+      <header class="header">
+        <div class="logo">
+          <span class="logo-mark">B</span>
+          <span class="logo-text">币安监控面板</span>
+        </div>
+        <nav class="tabs">
+          <button :class="{ active: store.activeTab === 'chart' }" @click="store.activeTab = 'chart'">行情图表</button>
+          <button :class="{ active: store.activeTab === 'stats' }" @click="store.activeTab = 'stats'">月度上新统计</button>
+          <button :class="{ active: store.activeTab === 'settings' }" @click="store.activeTab = 'settings'">监控设置</button>
+        </nav>
+        <button class="logout" @click="onLogout">退出登录</button>
+      </header>
+      <main class="main">
+        <KlineChart v-show="store.activeTab === 'chart'" />
+        <ListingsStats v-show="store.activeTab === 'stats'" />
+        <SettingsPanel v-show="store.activeTab === 'settings'" />
+      </main>
+    </template>
   </div>
 </template>
 
@@ -80,6 +105,20 @@ import { store } from './store'
 .tabs button.active {
   color: #f0b90b;
   background: #1e2329;
+}
+.logout {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid #2b3139;
+  color: #848e9c;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.logout:hover {
+  color: #eaecef;
+  border-color: #3e4550;
 }
 .main {
   padding: 16px 24px 24px;

@@ -9,3 +9,4 @@ services:
       - ./data:/app/data
     environment:
       - TZ=Asia/Shanghai
+      - ADMIN_PASS=改成你自己的登录密码

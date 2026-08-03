@@ -1,11 +1,13 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { fetchStatus, fetchSettings, saveSettings, testEmail, triggerMonitor } from '../api/monitor'
+import { fetchStatus, fetchSettings, saveSettings, testEmail, triggerMonitor, changePassword } from '../api/monitor'
 
 const form = ref({ smtp_host: '', smtp_port: '465', smtp_user: '', smtp_pass: '', recipients: '' })
+const pwd = ref({ old_password: '', new_password: '', confirm: '' })
 const status = ref(null)
 const saving = ref(false)
 const testing = ref(false)
+const pwdSaving = ref(false)
 const msg = ref({ type: '', text: '' })
 const settingsLoaded = ref(false)
 
@@ -68,6 +70,24 @@ async function onRun() {
   }
 }
 
+async function onChangePwd() {
+  if (pwd.value.new_password !== pwd.value.confirm) {
+    show('err', '两次输入的新密码不一致')
+    return
+  }
+  pwdSaving.value = true
+  show('', '')
+  try {
+    await changePassword(pwd.value.old_password, pwd.value.new_password)
+    pwd.value = { old_password: '', new_password: '', confirm: '' }
+    show('ok', '登录密码已修改，请牢记')
+  } catch (e) {
+    show('err', '修改失败：' + e.message)
+  } finally {
+    pwdSaving.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -102,8 +122,25 @@ onMounted(load)
       </div>
 
       <div class="card">
-        <h3>监控状态</h3>
-        <ul v-if="status" class="status-list">
+        <h3>修改登录密码</h3>
+        <label>当前密码
+          <input v-model="pwd.old_password" type="password" placeholder="输入当前登录密码" />
+        </label>
+        <label>新密码（至少 6 位）
+          <input v-model="pwd.new_password" type="password" placeholder="输入新密码" />
+        </label>
+        <label>确认新密码
+          <input v-model="pwd.confirm" type="password" placeholder="再次输入新密码" />
+        </label>
+        <div class="actions">
+          <button class="btn primary" :disabled="pwdSaving || !pwd.new_password" @click="onChangePwd">
+            {{ pwdSaving ? '保存中…' : '修改密码' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>监控状态</h3>        <ul v-if="status" class="status-list">
           <li>SMTP 已配置：<b :class="status.smtpConfigured ? 'ok' : 'bad'">{{ status.smtpConfigured ? '是' : '否' }}</b></li>
           <li>发件邮箱：<b>{{ status.smtpMasked || '—' }}</b></li>
           <li>收件人：<b :class="status.hasRecipients ? 'ok' : 'bad'">{{ status.hasRecipients ? '已配置' : '未配置' }}</b></li>

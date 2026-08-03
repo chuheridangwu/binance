@@ -1,8 +1,27 @@
-async function api(url, options) {
-  const res = await fetch(url, options)
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `接口错误: ${res.status}`)
-  return data
+import { api } from './http'
+
+export function login(password) {
+  return api('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  })
+}
+
+export function authStatus() {
+  return api('/api/auth/status')
+}
+
+export function logout() {
+  return api('/api/logout', { method: 'POST' })
+}
+
+export function changePassword(old_password, new_password) {
+  return api('/api/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ old_password, new_password }),
+  })
 }
 
 export function fetchListings() {

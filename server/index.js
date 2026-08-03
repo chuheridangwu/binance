@@ -6,12 +6,44 @@ import { db, getSettings, getSetting, setSetting } from './db.js'
 import * as binance from './binance.js'
 import * as monitor from './monitor.js'
 import { sendMail } from './mailer.js'
+import * as auth from './auth.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 app.use(express.json())
 
+auth.initAdminPass()
+
 app.get('/api/health', (_req, res) => res.json({ ok: true, time: Date.now() }))
+
+app.post('/api/login', (req, res) => {
+  const token = auth.login(String(req.body.password || ''))
+  if (!token) return res.status(401).json({ error: '密码错误' })
+  res.json({ token })
+})
+
+app.post('/api/logout', (req, res) => {
+  const token = String(req.headers.authorization || '').replace(/^Bearer /, '')
+  auth.logout(token)
+  res.json({ ok: true })
+})
+
+app.get('/api/auth/status', (req, res) => {
+  const token = String(req.headers.authorization || '').replace(/^Bearer /, '')
+  res.json({ authed: auth.checkToken(token) })
+})
+
+app.post('/api/change-password', (req, res) => {
+  const r = auth.changePassword(String(req.body.old_password || ''), String(req.body.new_password || ''))
+  if (!r.ok) return res.status(400).json({ error: r.error })
+  res.json({ ok: true })
+})
+
+app.use('/api', (req, res, next) => {
+  const token = String(req.headers.authorization || '').replace(/^Bearer /, '')
+  if (!auth.checkToken(token)) return res.status(401).json({ error: '未登录或登录已过期' })
+  next()
+})
 
 app.get('/api/klines', async (req, res) => {
   try {

@@ -1,8 +1,4 @@
-async function api(url) {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`接口错误: ${res.status}`)
-  return res.json()
-}
+import { api } from './http'
 
 export async function getKlines(symbol, interval, limit = 500) {
   const data = await api(`/api/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`)

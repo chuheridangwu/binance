@@ -105,6 +105,7 @@ function initChart() {
 }
 
 function renderChart() {
+  if (!chart) initChart()
   if (!chart) return
   const data = filteredMonths.value.map((m) => ({
     time: monthStartTime(m.key),
@@ -133,14 +134,14 @@ onMounted(async () => {
     months.value = data.months
     total.value = data.total
     generatedAt.value = data.generatedAt
-    await nextTick()
-    initChart()
-    renderChart()
   } catch (e) {
     error.value = '数据获取失败：' + e.message
   } finally {
     loading.value = false
   }
+  await nextTick()
+  initChart()
+  renderChart()
 })
 
 onBeforeUnmount(() => {
@@ -181,6 +182,12 @@ watch(
         <div class="card"><div class="num">{{ summary.last30 }}</div><div class="label">近 30 天上币</div></div>
       </div>
 
+      <div class="search-row">
+        <input v-model="search" class="search-input" placeholder="搜索币种，如 NEIRO / BTC / USDC" />
+        <span v-if="search.trim()" class="search-note">匹配 {{ matchedTotal }} 个</span>
+      </div>
+      <div v-if="!filteredMonths.length" class="no-result">没有匹配的币种</div>
+
       <div class="grid">
         <div class="card wide">
           <h3>每月上币量</h3>
@@ -209,12 +216,6 @@ watch(
           </table>
         </div>
       </div>
-
-      <div class="search-row">
-        <input v-model="search" class="search-input" placeholder="搜索币种，如 NEIRO / BTC / USDC" />
-        <span v-if="search.trim()" class="search-note">匹配 {{ matchedTotal }} 个</span>
-      </div>
-      <div v-if="!filteredMonths.length" class="no-result">没有匹配的币种</div>
 
       <div v-for="m in filteredMonths" :key="m.key" class="month-detail">
         <template v-if="expanded === m.key">

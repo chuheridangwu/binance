@@ -1,11 +1,12 @@
 # 币安监控面板
 
-个人自用的币安新币监控工具：K 线行情图表 + 月度上新统计 + 新币自动邮件提醒。
+个人自用的币安监控工具：K 线行情图表 + 指标选股 + 月度上新统计 + 新币/套利自动邮件提醒。
 
 ## 功能
 
-- **行情图表**：日/周/月/时 K 线，成交量、RSI、MACD 指标，历史数据懒加载
+- **行情图表**：15分/1小时/4小时/日 K 线，成交量、RSI、MACD、EMA 指标，历史数据滚动懒加载
 - **指标参数自定义**：RSI 周期、MACD 快/慢/信号线、EMA 周期均可在工具栏直接改
+- **指标选股**：一键全量扫描 USDT 永续合约（约 400+），按 5 条技术规则筛选，支持「任一 / 全部」匹配切换，命中结果矩阵表展示、点击跳行情；内置限速与缓存防币安封 IP
 - **套利监控**：永续/现货价差 + 当前资金费率 + 年化资金费率，一键刷新、点击跳行情；超过阈值自动邮件提醒（每 5 分钟扫描，每币每天一次）
 - **月度上新统计**：统计卡片（总/今年/本月/近30天）、每月上币量柱状图、上新高峰 Top5、年度对比，点击可直接跳转图表
 - **新币监控**：后端每 60 秒对比合约交易对清单，发现新上币自动通过 SMTP 发邮件；同时每天拉取币安官方公告补全数据
@@ -15,6 +16,8 @@
 
 - 前端：Vue 3 + Vite + lightweight-charts
 - 后端：Node.js（Express）+ node:sqlite（无需原生依赖）
+- 缓存：K 线 / OI / 合约列表 SQLite 持久化缓存（重启不丢、防重复拉取）
+- 限流：内置币安全局请求限速器 + 429/418 自动退避，防止触发 IP 封禁
 - 邮件：nodemailer（QQ/163 SMTP）
 - 部署：Docker + Docker Compose
 
@@ -24,9 +27,11 @@
 binance/
 ├── server/                       # Node 后端
 │   ├── index.js                  # Express 入口、全部 /api 路由、静态托管 dist
-│   ├── db.js                     # node:sqlite，listings / settings 表
+│   ├── db.js                     # node:sqlite：listings / settings / kline_cache / oi_cache 表
+│   ├── cache.js                  # 行情缓存读写：K线/OI，TTL 失效 + 30 天过期清理
 │   ├── auth.js                   # 登录：密码加盐哈希、token 签发与校验、改密码
-│   ├── binance.js                # 服务端直连币安（现货/合约 K 线、交易对清单、公告）
+│   ├── binance.js                # 服务端直连币安 + 全局限速器(429退避)（现货/合约 K 线、OI、交易对清单、公告）
+│   ├── screener.js               # 指标选股：全量扫描、5 规则计算、进度状态
 │   ├── spread.js                 # 套利数据：永续资金费率 + 现货/永续价差计算
 │   ├── monitor.js                # 新币监控 + 套利提醒：轮询、公告补全、发信状态
 │   └── mailer.js                 # SMTP 发信，配置从 settings 表读取
@@ -36,11 +41,12 @@ binance/
 │   ├── store.js                  # 共享状态（token、当前 Tab、symbol）
 │   ├── api/
 │   │   ├── http.js               # fetch 封装：自动带 token、401 处理
-│   │   ├── monitor.js            # 后端 API（登录/设置/状态/统计）
+│   │   ├── monitor.js            # 后端 API（登录/设置/状态/统计/选股）
 │   │   └── binance.js            # K 线与搜索 API
 │   └── components/
 │       ├── Login.vue             # 登录页
 │       ├── KlineChart.vue        # 行情图表（OHLC 头、成交量、可自定义指标、十字线）
+│       ├── ScreenerPanel.vue     # 指标选股面板（规则勾选、匹配切换、结果矩阵、进度）
 │       ├── SpreadPanel.vue       # 套利监控面板
 │       ├── ListingsStats.vue     # 月度上新统计 + 可视化
 │       └── SettingsPanel.vue     # SMTP 设置、套利提醒、监控状态、修改密码
@@ -50,6 +56,30 @@ binance/
 ├── vite.config.js                # Vite 配置（/api 代理到 3000）
 └── package.json
 ```
+
+## 指标选股（全量 USDT 永续合约）
+
+「指标选股」标签下点「开始扫描」，后端会对币安全部 USDT 永续合约（约 400+）拉取日线，按勾选的规则筛选，命中结果以矩阵表展示（绿色=命中，OI 列始终显示数值与涨跌箭头），点击行可跳转行情图表。
+
+支持 **「任一满足 / 全部满足」** 两种匹配逻辑切换。
+
+| 规则 | 判定条件 |
+|------|----------|
+| RSI(6) 一周内 ≥ 80 | 近 7 根日K中任意一根 RSI(6) ≥ 80 |
+| 3日内创新高 + RSI 顶背离 | 近 3 天价格创 60 天新高，且新高处 RSI(6) 低于前高处取值 |
+| 价格 ≥ 布林带上轨 | 收盘价站上布林带 (20, 2) 上轨 |
+| OI 持续增加 | 永续未平仓合约量近 5 天净增，且至少 3 天上升 |
+| 单日量 > 近7日总和 | 最近一根日K成交量大于之前 7 天之和 |
+
+### 防封号 / 限流保护
+
+一次性全量拉 400+ 合约容易被币安限频（HTTP 429）甚至封 IP（HTTP 418），项目内置三重保护：
+
+- **全局限速器**：同一时刻最多 4 个在途请求，相邻请求间隔 180ms，宁可扫描慢也不打爆
+- **429/418 自动退避**：按 `retry-after` 冷却后重试，重试耗尽返回明确报错
+- **SQLite 行情缓存**：K 线缓存 1 小时、OI 缓存 10 分钟、合约列表 30 分钟，全部落盘 `data/app.db`；重复扫描与重启后直接复用、几乎零 API 消耗，30 天前的旧数据自动清理
+
+首次全量扫描约需 **2-4 分钟**（受限速保护）；之后一小时内再扫基本走缓存，几秒完成。扫描中前端实时显示进度与命中数。
 
 ## 开始使用
 
@@ -140,7 +170,7 @@ fi
 
 所有运行数据都在 `data/` 目录（宿主机 `/opt/binance/data/`），包含：
 
-- `app.db`：SQLite 数据库（上新记录、SMTP 设置、密码哈希、监控状态）
+- `app.db`：SQLite 数据库（上新记录、SMTP 设置、密码哈希、监控状态、行情缓存、扫描结果）
 - `INITIAL_PASSWORD.txt`：初始登录密码
 
 ### 手动备份
@@ -181,9 +211,11 @@ SMTP 配置、密码、上新记录都在 `app.db` 里，拷完数据即全部�
 
 ```bash
 apt install -y sqlite3        # 宿主机安装 sqlite3
-sqlite3 /opt/binance/data/app.db ".tables"                       # 查看表
+sqlite3 /opt/binance/data/app.db ".tables"                       # 查看所有表
 sqlite3 /opt/binance/data/app.db "SELECT * FROM settings;"        # 查看配置
-sqlite3 /opt/binance/data/app.db "SELECT * FROM listings ORDER BY date DESC LIMIT 20;"  # 查看上新记录
+sqlite3 /opt/binance/data/app.db "SELECT * FROM listings ORDER BY date DESC LIMIT 20;"            # 查看上新记录
+sqlite3 /opt/binance/data/app.db "SELECT symbol, COUNT(*) FROM kline_cache GROUP BY symbol LIMIT 5;"  # 查看已缓存 K 线
+sqlite3 /opt/binance/data/app.db "SELECT symbol, oi, oi_value FROM oi_cache ORDER BY time DESC LIMIT 5;" # 查看 OI 缓存
 ```
 
 > 手动修改数据前请先 `docker compose stop`，改完再启动。

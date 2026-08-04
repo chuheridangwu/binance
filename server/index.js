@@ -8,6 +8,7 @@ import * as monitor from './monitor.js'
 import { sendMail } from './mailer.js'
 import * as auth from './auth.js'
 import { getSpreadData, DEFAULT_WATCH } from './spread.js'
+import * as screener from './screener.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -81,6 +82,31 @@ app.get('/api/spread', async (req, res) => {
     res.json(data)
   } catch (e) {
     res.status(502).json({ error: e.message })
+  }
+})
+
+app.get('/api/screener', (_req, res) => {
+  res.json(screener.getLastResults() || { results: [], mode: 'any', rules: [], generatedAt: 0 })
+})
+
+app.get('/api/screener/status', (_req, res) => {
+  res.json(screener.getScanState())
+})
+
+app.post('/api/screener', async (req, res) => {
+  try {
+    const rules = {
+      r1: !!req.body.r1,
+      r2: !!req.body.r2,
+      r3: !!req.body.r3,
+      r4: !!req.body.r4,
+      r5: !!req.body.r5,
+    }
+    const mode = req.body.mode === 'all' ? 'all' : 'any'
+    const result = await screener.scan(rules, mode)
+    res.json({ ok: true, ...result, state: screener.getScanState() })
+  } catch (e) {
+    res.status(400).json({ error: e.message })
   }
 })
 

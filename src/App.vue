@@ -4,6 +4,7 @@ import KlineChart from './components/KlineChart.vue'
 import ListingsStats from './components/ListingsStats.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import SpreadPanel from './components/SpreadPanel.vue'
+import ScreenerPanel from './components/ScreenerPanel.vue'
 import Login from './components/Login.vue'
 import { store, setAuthed } from './store'
 import { authStatus, logout } from './api/monitor'
@@ -39,6 +40,7 @@ onMounted(async () => {
         <nav class="tabs">
           <button :class="{ active: store.activeTab === 'chart' }" @click="store.activeTab = 'chart'">行情图表</button>
           <button :class="{ active: store.activeTab === 'spread' }" @click="store.activeTab = 'spread'">套利监控</button>
+          <button :class="{ active: store.activeTab === 'screener' }" @click="store.activeTab = 'screener'">指标选股</button>
           <button :class="{ active: store.activeTab === 'stats' }" @click="store.activeTab = 'stats'">月度上新统计</button>
           <button :class="{ active: store.activeTab === 'settings' }" @click="store.activeTab = 'settings'">监控设置</button>
         </nav>
@@ -47,6 +49,7 @@ onMounted(async () => {
       <main class="main">
         <KlineChart v-show="store.activeTab === 'chart'" />
         <SpreadPanel v-show="store.activeTab === 'spread'" />
+        <ScreenerPanel v-show="store.activeTab === 'screener'" />
         <ListingsStats v-show="store.activeTab === 'stats'" />
         <SettingsPanel v-show="store.activeTab === 'settings'" />
       </main>

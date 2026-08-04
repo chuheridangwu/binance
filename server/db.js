@@ -23,7 +23,29 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT
 );
+CREATE TABLE IF NOT EXISTS kline_cache (
+  symbol     TEXT NOT NULL,
+  interval   TEXT NOT NULL,
+  time       INTEGER NOT NULL,
+  open       REAL,
+  high       REAL,
+  low        REAL,
+  close      REAL,
+  volume     REAL,
+  fetched_at INTEGER NOT NULL,
+  PRIMARY KEY (symbol, interval, time)
+);
+CREATE TABLE IF NOT EXISTS oi_cache (
+  symbol     TEXT NOT NULL,
+  time       INTEGER NOT NULL,
+  oi         REAL,
+  oi_value   REAL,
+  fetched_at INTEGER NOT NULL,
+  PRIMARY KEY (symbol, time)
+);
 CREATE INDEX IF NOT EXISTS idx_listings_date ON listings(date);
+CREATE INDEX IF NOT EXISTS idx_kline_cache_lookup ON kline_cache(symbol, interval, fetched_at);
+CREATE INDEX IF NOT EXISTS idx_oi_cache_lookup ON oi_cache(symbol, fetched_at);
 `)
 
 export function getSetting(key) {

@@ -56,3 +56,19 @@ export function fetchSpread(symbols) {
   const q = symbols.join(',')
   return api(`/api/spread?symbols=${encodeURIComponent(q)}`)
 }
+
+export function startScreener(rules, mode) {
+  return api('/api/screener', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...rules, mode }),
+  })
+}
+
+export function screenerStatus() {
+  return api('/api/screener/status')
+}
+
+export function fetchScreenerResults() {
+  return api('/api/screener')
+}

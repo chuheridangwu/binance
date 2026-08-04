@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS listings (
   date     INTEGER NOT NULL,
   market   TEXT DEFAULT '',
   notified INTEGER DEFAULT 0,
-  source   TEXT DEFAULT ''
+  source   TEXT DEFAULT '',
+  retry_count       INTEGER DEFAULT 0,
+  last_notify_attempt INTEGER
 );
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
@@ -47,6 +49,14 @@ CREATE INDEX IF NOT EXISTS idx_listings_date ON listings(date);
 CREATE INDEX IF NOT EXISTS idx_kline_cache_lookup ON kline_cache(symbol, interval, fetched_at);
 CREATE INDEX IF NOT EXISTS idx_oi_cache_lookup ON oi_cache(symbol, fetched_at);
 `)
+
+const listingCols = new Set(db.prepare('PRAGMA table_info(listings)').all().map((c) => c.name))
+if (!listingCols.has('retry_count')) {
+  db.exec('ALTER TABLE listings ADD COLUMN retry_count INTEGER DEFAULT 0')
+}
+if (!listingCols.has('last_notify_attempt')) {
+  db.exec('ALTER TABLE listings ADD COLUMN last_notify_attempt INTEGER')
+}
 
 export function getSetting(key) {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key)

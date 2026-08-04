@@ -31,7 +31,7 @@
 
 ## 2. 我们已经完成了什么（全部已提交并推送）
 
-功能完整可用，已合入 main 并推送（当前 HEAD 为 `a1e18f0`，README 完善版）：
+功能完整可用，已合入 main 并推送（当前 HEAD 为 `20db6fb`）。新增：新币/套利**邮件通知失败自动重试**（见下）。
 
 ### 后端
 - `server/binance.js`
@@ -52,6 +52,11 @@
 - `docker-compose.yml`：`ADMIN_PASS` 改为 `${ADMIN_PASS:-}`，从 gitignore 的 `.env` 读取。
 - `README.md`：完善新增功能、限流/缓存说明、项目结构、规则表、数据表查询示例。
 - `HANDOFF.md`：本文件。
+
+### 邮件通知可靠性（修复）
+- `listings` 表新增 `retry_count` / `last_notify_attempt`（含 `ALTER TABLE` 迁移，已在本机验证列存在）。
+- `notify()` 改为：已发不重复；失败保留 `notified=0`；**每 30 分钟限速重试、最多 10 次后放弃**（放弃会写进 `scanErrors`）。
+- 新增 `retryPendingNotifications()`，随 `runOnce()` 每次扫描执行：重发「近 2 天内、未通知、未超限」的记录，并按「已通知 symbol 集合」去重，避免同一币种走 市场diff/公告 两条路径重复发信。这同时兜住了「23:59 上线过零点被 `isSameDay` 漏掉」的边缘情况。
 
 **部署状态**：服务器 `/opt/binance` 已完成清理并运行**最新代码**，每次 `git push` 后约 1 分钟内自动生效。若后续出现「服务器无更新」，优先怀疑 `.env` 被误改或 docker-compose 相关文件被抓改（见第 5 节坑 1/2）。
 

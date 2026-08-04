@@ -15,6 +15,10 @@ const state = {
   running: false,
 }
 
+const MAX_NOTIFY_ATTEMPTS = 10
+const NOTIFY_ATTEMPT_INTERVAL_MS = 30 * 60 * 1000
+const NOTIFY_RETRY_WINDOW_MS = 2 * 24 * 60 * 60 * 1000
+
 export function getStatus() {
   state.totalListings = db.prepare('SELECT COUNT(*) AS n FROM listings').get().n
   state.notifiedCount = db.prepare('SELECT COUNT(*) AS n FROM listings WHERE notified = 1').get().n
@@ -28,8 +32,17 @@ function isSameDay(a, b) {
 }
 
 async function notify(listing) {
-  const up = db.prepare('SELECT notified FROM listings WHERE code = ?').get(listing.code)
-  if (up?.notified) return
+  const row = db.prepare('SELECT notified, retry_count, last_notify_attempt FROM listings WHERE code = ?').get(listing.code)
+  if (row?.notified) return
+  const now = Date.now()
+  const attempts = row?.retry_count ?? 0
+  if (attempts >= MAX_NOTIFY_ATTEMPTS) {
+    state.scanErrors.push(`通知${listing.symbol}重试已达上限(${MAX_NOTIFY_ATTEMPTS} 次)，放弃`)
+    state.scanErrors = state.scanErrors.slice(-20)
+    return
+  }
+  if (row?.last_notify_attempt && now - row.last_notify_attempt < NOTIFY_ATTEMPT_INTERVAL_MS) return
+  db.prepare('UPDATE listings SET last_notify_attempt = ?, retry_count = retry_count + 1 WHERE code = ?').run(now, listing.code)
   const display = listing.title ? listing.title : `币安新上线：${listing.symbol}`
   const dateStr = new Date(listing.date).toISOString().slice(0, 10)
   try {
@@ -44,6 +57,20 @@ async function notify(listing) {
     console.error(`[mail] 发送邮件失败(${listing.symbol}):`, e.message)
     state.scanErrors.push(`发送邮件失败(${listing.symbol}): ${e.message}`)
     state.scanErrors = state.scanErrors.slice(-20)
+  }
+}
+
+async function retryPendingNotifications() {
+  const cutoff = Date.now() - NOTIFY_RETRY_WINDOW_MS
+  const notifiedSyms = new Set(
+    db.prepare('SELECT DISTINCT symbol FROM listings WHERE notified = 1').all().map((r) => r.symbol)
+  )
+  const rows = db
+    .prepare('SELECT code, symbol, title, date FROM listings WHERE notified = 0 AND date >= ? AND retry_count < ?')
+    .all(cutoff, MAX_NOTIFY_ATTEMPTS)
+  for (const r of rows) {
+    if (notifiedSyms.has(r.symbol)) continue
+    await notify({ code: r.code, symbol: r.symbol, title: r.title, date: r.date })
   }
 }
 
@@ -140,6 +167,7 @@ export async function runOnce() {
     if (Date.now() - state.lastAnnouncementScan > 30 * 60 * 1000) {
       await scanAnnouncements()
     }
+    await retryPendingNotifications()
     if (Date.now() - state.lastSpreadScan > 5 * 60 * 1000) {
       await scanSpreads()
     }

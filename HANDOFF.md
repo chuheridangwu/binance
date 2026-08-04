@@ -63,6 +63,12 @@
 - 前端：`ScreenerPanel.vue` 增加月份选择器（`<input type="month">`）+ 清空按钮 + 「上架」列；`startScreener(rules, mode, month)` 传参。月份校验正则 `^\d{4}-\d{2}$`。
 - 月份边界按服务器时区（Docker=UTC）计算，月底最后 1 小时上架可能 ±1 月。
 
+### 全量币种搜索（含下架）
+- `getAllSymbols()`（新增）：扫描 现货+合约 exchangeInfo 全部状态（含 `BREAK`/下架）的 USDT 交易对，返回 `[{symbol, active}]`，内存缓存 30 分钟；现货/合约同名优先取 `active=true`。
+- `searchSymbols(keyword)`：改为返回对象数组，**active 在前、已下架排后**，组内按符号排序，截 30 条。
+- 前端 `KlineChart.vue` 下拉：`pick(s)` 兼容字符串/对象（取 `s.symbol`）；已下架项灰显 + 「已下架」徽标。
+- **指标选股不受影响**：扫描沿用 `getPerpetualSymbols()`（仅 `status==='TRADING'` 的 USDT 永续），下架合约天然被排除。
+
 **部署状态**：服务器 `/opt/binance` 已完成清理并运行**最新代码**，每次 `git push` 后约 1 分钟内自动生效。若后续出现「服务器无更新」，优先怀疑 `.env` 被误改或 docker-compose 相关文件被抓改（见第 5 节坑 1/2）。
 
 ### 踩过的坑的修复记录（对应第 5 节）

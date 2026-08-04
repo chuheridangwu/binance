@@ -160,20 +160,38 @@ export async function getKlines(symbol, interval, limit = 500, beforeSec) {
   }
 }
 
-export async function searchSymbols(keyword) {
-  const kw = (keyword || '').toUpperCase()
-  const all = []
+let allSymbolsCache = null
+let allSymbolsExp = 0
+
+export async function getAllSymbols() {
+  if (allSymbolsCache && allSymbolsExp > Date.now()) return allSymbolsCache
+  const out = new Map()
   for (const base of [SPOT, FUTURES]) {
     try {
       const data = await getJson(`${base}/exchangeInfo`)
-      data.symbols
-        .filter((s) => s.status === 'TRADING' && s.quoteAsset === 'USDT' && s.symbol.includes(kw))
-        .forEach((s) => all.push(s.symbol))
+      for (const s of data.symbols) {
+        if (s.quoteAsset !== 'USDT') continue
+        const active = s.status === 'TRADING'
+        if (!out.has(s.symbol) || active) out.set(s.symbol, active)
+      }
     } catch {
       /* 忽略 */
     }
   }
-  return [...new Set(all)].slice(0, 30)
+  allSymbolsCache = [...out.entries()].map(([symbol, active]) => ({ symbol, active }))
+  allSymbolsExp = Date.now() + 30 * 60 * 1000
+  return allSymbolsCache
+}
+
+export async function searchSymbols(keyword) {
+  const kw = (keyword || '').toUpperCase()
+  const all = await getAllSymbols()
+  const matches = all.filter((s) => s.symbol.includes(kw))
+  matches.sort((a, b) => {
+    if (a.active !== b.active) return a.active ? -1 : 1
+    return a.symbol.localeCompare(b.symbol)
+  })
+  return matches.slice(0, 30)
 }
 
 function parseListedSymbol(title) {

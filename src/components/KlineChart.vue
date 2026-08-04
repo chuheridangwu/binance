@@ -376,9 +376,10 @@ async function onSearchInput() {
 }
 
 function pick(s) {
-  symbol.value = s
-  query.value = s
-  store.chartSymbol = s
+  const sym = typeof s === 'string' ? s : s.symbol
+  symbol.value = sym
+  query.value = sym
+  store.chartSymbol = sym
   suggestions.value = []
   reload()
 }
@@ -419,7 +420,14 @@ watch(
           @keyup.enter="pick(query.trim().toUpperCase())"
         />
         <ul v-if="suggestions.length" class="dropdown">
-          <li v-for="s in suggestions" :key="s" @mousedown.prevent="pick(s)">{{ s }}</li>
+          <li
+            v-for="s in suggestions"
+            :key="s.symbol"
+            :class="{ delisted: !s.active }"
+            @mousedown.prevent="pick(s)"
+          >
+            {{ s.symbol }}<span v-if="!s.active" class="badge">已下架</span>
+          </li>
         </ul>
       </div>
       <div class="seg">
@@ -532,6 +540,20 @@ watch(
   padding: 8px 12px;
   cursor: pointer;
   font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dropdown li.delisted {
+  color: #5e6673;
+}
+.dropdown li.delisted .badge {
+  margin-left: auto;
+  font-size: 11px;
+  color: #5e6673;
+  border: 1px solid #2b3139;
+  border-radius: 4px;
+  padding: 1px 6px;
 }
 .dropdown li:hover {
   background: #2b3139;

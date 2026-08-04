@@ -53,6 +53,8 @@
 - `README.md`：完善新增功能、限流/缓存说明、项目结构、规则表、数据表查询示例。
 - `HANDOFF.md`：本文件。
 
+**部署状态**：服务器 `/opt/binance` 已完成清理并运行**最新代码**，每次 `git push` 后约 1 分钟内自动生效。若后续出现「服务器无更新」，优先怀疑 `.env` 被误改或 docker-compose 相关文件被抓改（见第 5 节坑 1/2）。
+
 ### 踩过的坑的修复记录（对应第 5 节）
 - `checkR5` 曾因 `n<9` 越界空数组崩，改为 `n<8` 提前返回 false。
 - `fmtPrice` / `fmtOi` 函数曾在面板重构中被误删 → 界面报「fmtPrice is not defined」，已补回。
@@ -62,38 +64,29 @@
 
 ## 3. 当前卡在哪（关键！）
 
-1. **服务器仍跑旧代码，未完成一次性清理。**
-   用户服务器 `/opt/binance` 曾被手动改过被 git 跟踪的 `docker-compose.yml`（塞了明文 ADMIN_PASS）。这导致 `git pull` 永远报 "local changes would be overwritten"，自动部署脚本却 `|| true` 继续重建 → **每 1 分钟重复空重建**，且 HEAD 永远不退，最新功能全部不生效。
-   **服务器侧尚未执行清理**，后续所有提交（含 OI 修复、fmtPrice、README）在服务器上都不会生效，改密码问题（旧 initAdminPass 每次启动用 ADMIN_PASS 覆盖库内密码）也不会解决。
-
-2. **本机无法访问币安 API 做线上实测。**
+1. **本机无法访问币安 API 做线上实测。**
    `curl https://api.binance.com` / `https://fapi.binance.com` 都返回 **HTTP 000**（网络/地域限制）。因此全量扫描、OI 真实数据、限流在真实环境的表现**从未实测**，只用 stub fetch + 合成数据在单元级验证过。
 
-3. **推送/网络不稳定。**
+2. **推送/网络不稳定。**
    本机 GitHub 网络偶发超时（HTTP2 framing layer、连接 443 超时）。push 卡住时可重试，或 `git -c http.version=HTTP/1.1 push` 强制 HTTP/1.1。
 
-4. **测试期间删除过 `data/app.db`**（gitignore）。下次本地启动会重新建库并生成新初始密码（`data/INITIAL_PASSWORD.txt`），旧 SMTP 配置、密码、上新记录丢失。服务器上的库不受影响。
+3. **测试期间删除过 `data/app.db`**（gitignore）。下次本地启动会重新建库并生成新初始密码（`data/INITIAL_PASSWORD.txt`），旧 SMTP 配置、密码、上新记录丢失。服务器上的库不受影响。
+
+> **已解除的旧卡点**：服务器部署问题已于用户确认清理完成——`/opt/binance` 现跑**最新代码**，后续每次 `git push` 服务器 1 分钟内自动 `git pull` + 重建，无需再处理服务器清理。改密码问题（旧 initAdminPass 覆盖库内密码）也已随新代码一起解决。
 
 ---
 
 ## 4. 下一步计划是什么（按优先级）
 
-1. **让用户完成服务器一次性清理**（这是解除一切服务器卡点的前提）：
+1. **由用户实测线上扫描**：确认服务器已跑最新代码（即将发生），在页面上点「指标选股 → 开始扫描」，确认：
+   - OI 列有值（不再全空，即便未命中规则也显示数值+箭头）
+   - 扫描过程不报 429/418、不封 IP、能正常跑完
+   - 命中结果合理性
+   - 修改密码生效（验证旧 bug 已随新代码修复）
 
-   ```bash
-   cd /opt/binance
-   # 若之前把 ADMIN_PASS 写进了 docker-compose.yml，先迁到 .env
-   grep -n ADMIN_PASS docker-compose.yml
-   echo 'ADMIN_PASS=你的真密码' > /opt/binance/.env
-   git checkout -- .          # 丢弃被跟踪文件的本地改动（本地配置都在 .env 和 data/，均 gitignore，不受影响）
-   ```
-   然后确认 1Panel 计划任务的 shell 脚本是 README「自动更新」章节的新版（含 `git checkout -- .` 与 `if ! git pull --ff-only; then exit 1`）。等下一次 cron 拉到最新提交并重建。
+2. **若 OI 仍全空或扫描报错**：查 `docker logs` 容器日志，重点看 `openInterestHistory` 是否被区域/限流拦截（本机无法复现，需服务器侧证据）。
 
-2. **部署后由用户实测线上扫描**：确认 OI 列有值、扫描不报 429/418、结果合理。
-
-3. **若 OI 仍全空或扫描报错**：查 `docker logs` 容器日志，重点看 `openInterestHistory` 是否被区域/限流拦截（本机无法复现，需服务器侧证据）。
-
-4. **可选增强**（用户曾提过，未实现）：
+3. **可选增强**（用户曾提过，未实现）：
    - 增加一条 **底背离** 规则（当前 5 条偏「强势/做空回转」方向）。
    - 将某条规则做成「只高亮不自动提醒」，或加自动邮件告警。
 

@@ -1,6 +1,7 @@
 import { db } from './db.js'
 
 const TTL_KLINE = 60 * 60 * 1000
+const TTL_KLINE_LATEST = 5 * 60 * 1000
 const TTL_OI = 10 * 60 * 1000
 const RETENTION_MS = 30 * 24 * 3600 * 1000
 
@@ -33,6 +34,31 @@ export function writeKlines(symbol, interval, rows) {
     db.exec('ROLLBACK')
     throw e
   }
+}
+
+const rowMapper = (r) => ({ time: r.time, open: r.open, high: r.high, low: r.low, close: r.close, volume: r.volume })
+
+// 行情页 K 线：带翻页(limit/before)的窗口读取。
+// 历史页(带 before)数据不会变，直接命中缓存；最新页要求 fetched_at 在较短时间内。
+export function readKlinesWindow(symbol, interval, limit, beforeSec) {
+  if (beforeSec) {
+    const rows = db
+      .prepare(
+        'SELECT time, open, high, low, close, volume FROM kline_cache WHERE symbol = ? AND interval = ? AND time < ? ORDER BY time DESC LIMIT ?'
+      )
+      .all(symbol, interval, beforeSec, limit)
+    return rows.length ? rows.reverse().map(rowMapper) : null
+  }
+  const newest = db
+    .prepare('SELECT MAX(fetched_at) AS f FROM kline_cache WHERE symbol = ? AND interval = ?')
+    .get(symbol, interval)
+  if (!newest.f || Date.now() - newest.f > TTL_KLINE_LATEST) return null
+  const rows = db
+    .prepare(
+      'SELECT time, open, high, low, close, volume FROM kline_cache WHERE symbol = ? AND interval = ? ORDER BY time DESC LIMIT ?'
+    )
+    .all(symbol, interval, limit)
+  return rows.length ? rows.reverse().map(rowMapper) : null
 }
 
 export function readOi(symbol) {

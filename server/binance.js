@@ -1,4 +1,5 @@
-import { readKlines, writeKlines, readOi, writeOi } from './cache.js'
+import { readKlines, writeKlines, readOi, writeOi, readKlinesWindow } from './cache.js'
+import { db } from './db.js'
 
 const SPOT = 'https://api.binance.com/api/v3'
 const FUTURES = 'https://fapi.binance.com/fapi/v1'
@@ -63,26 +64,95 @@ async function getJson(url, timeoutMs = 15000) {
   }
 }
 
-export async function getExchangeInfo(market) {
-  const base = market === 'futures' ? FUTURES : SPOT
-  const data = await getJson(`${base}/exchangeInfo`)
-  return data.symbols
-    .filter((s) => s.status === 'TRADING' && s.quoteAsset === 'USDT')
-    .map((s) => s.symbol)
-}
+const SYMBOLS_TTL = 30 * 60 * 1000
+const SYMBOLS_MAX_STALE = 12 * 3600 * 1000
 
 let symbolsCache = null
 let symbolsExp = 0
+let allSymbolsCache = null
+let allSymbolsExp = 0
+let exchangeCache = { spot: null, futures: null }
+let exchangeExp = { spot: 0, futures: 0 }
+
+// 币种列表持久化到 DB：监控每分钟读一次合约列表、搜索/扫描也反复读。
+// 落库后重启不重拉，也天然成为币安 API 故障时的兜底数据。
+async function fetchAndStoreSymbols() {
+  const now = Date.now()
+  const stmt = db.prepare(
+    `INSERT INTO symbols (symbol, market, active, type, fetched_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(symbol, market) DO UPDATE SET
+       active = excluded.active, type = excluded.type, fetched_at = excluded.fetched_at`
+  )
+  db.exec('BEGIN')
+  try {
+    for (const base of [SPOT, FUTURES]) {
+      const market = base === FUTURES ? 'futures' : 'spot'
+      try {
+        const data = await getJson(`${base}/exchangeInfo`)
+        for (const s of data.symbols) {
+          if (s.quoteAsset !== 'USDT') continue
+          stmt.run(s.symbol, market, s.status === 'TRADING' ? 1 : 0, s.contractType || '', now)
+        }
+      } catch {
+        /* 单个市场拉取失败不致命，保留旧数据 */
+      }
+    }
+    db.exec('COMMIT')
+  } catch (e) {
+    db.exec('ROLLBACK')
+    throw e
+  }
+}
+
+async function ensureSymbolsFresh() {
+  const m = db.prepare('SELECT MAX(fetched_at) AS t FROM symbols').get()
+  if (!m.t || Date.now() - m.t > SYMBOLS_MAX_STALE) {
+    try {
+      await fetchAndStoreSymbols()
+    } catch {
+      /* 拉取失败用旧数据兜底 */
+    }
+  }
+}
+
+export async function getExchangeInfo(market) {
+  const key = market === 'futures' ? 'futures' : 'spot'
+  if (exchangeCache[key] && exchangeExp[key] > Date.now()) return exchangeCache[key]
+  await ensureSymbolsFresh()
+  const rows = db.prepare('SELECT symbol FROM symbols WHERE market = ? AND active = 1').all(key)
+  exchangeCache[key] = rows.map((r) => r.symbol)
+  exchangeExp[key] = Date.now() + SYMBOLS_TTL
+  return exchangeCache[key]
+}
+
 export async function getPerpetualSymbols() {
   if (symbolsCache && symbolsExp > Date.now()) return symbolsCache
-  const data = await getJson(`${FUTURES}/exchangeInfo`)
-  const syms = data.symbols
-    .filter((s) => s.status === 'TRADING' && s.quoteAsset === 'USDT' && s.contractType === 'PERPETUAL')
-    .map((s) => s.symbol)
-  symbolsCache = syms
-  symbolsExp = Date.now() + 30 * 60 * 1000
-  return syms
+  await ensureSymbolsFresh()
+  const rows = db
+    .prepare("SELECT symbol FROM symbols WHERE market = 'futures' AND active = 1 AND type = 'PERPETUAL'")
+    .all()
+  symbolsCache = rows.map((r) => r.symbol)
+  symbolsExp = Date.now() + SYMBOLS_TTL
+  return symbolsCache
 }
+
+export async function getAllSymbols() {
+  if (allSymbolsCache && allSymbolsExp > Date.now()) return allSymbolsCache
+  await ensureSymbolsFresh()
+  const rows = db.prepare('SELECT symbol, active FROM symbols').all()
+  const out = new Map()
+  for (const r of rows) {
+    if (!out.has(r.symbol) || r.active === 1) out.set(r.symbol, r.active === 1)
+  }
+  allSymbolsCache = [...out.entries()].map(([symbol, active]) => ({ symbol, active }))
+  allSymbolsExp = Date.now() + SYMBOLS_TTL
+  return allSymbolsCache
+}
+
+setInterval(() => {
+  fetchAndStoreSymbols().catch(() => {})
+}, SYMBOLS_TTL).unref?.()
 
 export async function getFuturesKlines(symbol, interval, limit = 120) {
   const cached = readKlines(symbol, interval)
@@ -134,12 +204,14 @@ export async function getFirstKlineTime(symbol, market) {
 }
 
 export async function getKlines(symbol, interval, limit = 500, beforeSec) {
+  const cached = readKlinesWindow(symbol, interval, limit, beforeSec)
+  if (cached) return cached
   const url =
     `${SPOT}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}` +
     (beforeSec ? `&endTime=${beforeSec * 1000 - 1}` : '')
   try {
     const rows = await getJson(url)
-    return rows.map((r) => ({
+    const klines = rows.map((r) => ({
       time: r[0] / 1000,
       open: +r[1],
       high: +r[2],
@@ -147,9 +219,11 @@ export async function getKlines(symbol, interval, limit = 500, beforeSec) {
       close: +r[4],
       volume: +r[5],
     }))
+    if (klines.length) writeKlines(symbol, interval, klines)
+    return klines
   } catch {
     const rows = await getJson(url.replace(SPOT, FUTURES))
-    return rows.map((r) => ({
+    const klines = rows.map((r) => ({
       time: r[0] / 1000,
       open: +r[1],
       high: +r[2],
@@ -157,30 +231,9 @@ export async function getKlines(symbol, interval, limit = 500, beforeSec) {
       close: +r[4],
       volume: +r[5],
     }))
+    if (klines.length) writeKlines(symbol, interval, klines)
+    return klines
   }
-}
-
-let allSymbolsCache = null
-let allSymbolsExp = 0
-
-export async function getAllSymbols() {
-  if (allSymbolsCache && allSymbolsExp > Date.now()) return allSymbolsCache
-  const out = new Map()
-  for (const base of [SPOT, FUTURES]) {
-    try {
-      const data = await getJson(`${base}/exchangeInfo`)
-      for (const s of data.symbols) {
-        if (s.quoteAsset !== 'USDT') continue
-        const active = s.status === 'TRADING'
-        if (!out.has(s.symbol) || active) out.set(s.symbol, active)
-      }
-    } catch {
-      /* 忽略 */
-    }
-  }
-  allSymbolsCache = [...out.entries()].map(([symbol, active]) => ({ symbol, active }))
-  allSymbolsExp = Date.now() + 30 * 60 * 1000
-  return allSymbolsCache
 }
 
 export async function searchSymbols(keyword) {
@@ -201,7 +254,7 @@ function parseListedSymbol(title) {
   return m2 ? m2[1] : null
 }
 
-export async function fetchListingAnnouncements(maxPages = 40) {
+export async function fetchListingAnnouncements(maxPages = 40, known = new Set()) {
   const fourYearsAgo = Date.now() - 4 * 366 * 24 * 3600 * 1000
   const seen = new Map()
   let page = 1
@@ -217,6 +270,8 @@ export async function fetchListingAnnouncements(maxPages = 40) {
       for (const a of articles) {
         if (!seen.has(a.code)) seen.set(a.code, a)
       }
+      // 整页公告都已在库里：后面的页都是旧的，不必再翻，避免每 30 分钟重复拉全量页
+      if (known.size && articles.every((a) => known.has(a.code))) break
       consecutiveFailures = 0
       page++
     } catch {

@@ -69,6 +69,12 @@
 - 前端 `KlineChart.vue` 下拉：`pick(s)` 兼容字符串/对象（取 `s.symbol`）；已下架项灰显 + 「已下架」徽标。
 - **指标选股不受影响**：扫描沿用 `getPerpetualSymbols()`（仅 `status==='TRADING'` 的 USDT 永续），下架合约天然被排除。
 
+### DB 持久化（避免重复拉币安）
+- `symbols` 表（symbol+market 主键）：落库现货/合约全部 USDT 交易对（含下架，active 标记 + futures 的 contractType）。`getExchangeInfo` / `getPerpetualSymbols` / `getAllSymbols` 全部改为 DB 兜底 + 内存 30 分钟 TTL + 后台 30 分钟定时刷新；重启不再冷拉，币安 API 挂了也能用旧数据兜底。
+- 监控原每分钟拉一次合约 exchangeInfo（约 1440 次/天）→ 现在走缓存（约 96 次/天）。
+- 行情页 K 线（`getKlines`）接入 `kline_cache`：历史页(带 before)永久命中，最新页 5 分钟 TTL；翻页/重开图表不再重复拉。
+- 公告扫描增量翻页：`fetchListingAnnouncements(20, known)` 整页公告都已入库即停止，每 30 分钟从 20 页降到通常 1~2 页。
+
 **部署状态**：服务器 `/opt/binance` 已完成清理并运行**最新代码**，每次 `git push` 后约 1 分钟内自动生效。若后续出现「服务器无更新」，优先怀疑 `.env` 被误改或 docker-compose 相关文件被抓改（见第 5 节坑 1/2）。
 
 ### 踩过的坑的修复记录（对应第 5 节）

@@ -45,9 +45,18 @@ CREATE TABLE IF NOT EXISTS oi_cache (
   fetched_at INTEGER NOT NULL,
   PRIMARY KEY (symbol, time)
 );
+CREATE TABLE IF NOT EXISTS symbols (
+  symbol     TEXT NOT NULL,
+  market     TEXT NOT NULL,
+  active     INTEGER NOT NULL DEFAULT 0,
+  type       TEXT DEFAULT '',
+  fetched_at INTEGER NOT NULL,
+  PRIMARY KEY (symbol, market)
+);
 CREATE INDEX IF NOT EXISTS idx_listings_date ON listings(date);
 CREATE INDEX IF NOT EXISTS idx_kline_cache_lookup ON kline_cache(symbol, interval, fetched_at);
 CREATE INDEX IF NOT EXISTS idx_oi_cache_lookup ON oi_cache(symbol, fetched_at);
+CREATE INDEX IF NOT EXISTS idx_symbols_market_active ON symbols(market, active);
 `)
 
 const listingCols = new Set(db.prepare('PRAGMA table_info(listings)').all().map((c) => c.name))

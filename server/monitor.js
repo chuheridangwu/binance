@@ -84,7 +84,8 @@ async function upsertListing({ code, symbol, title, date, market, source }) {
 
 async function scanAnnouncements() {
   try {
-    const list = await fetchListingAnnouncements(20)
+    const known = new Set(db.prepare('SELECT code FROM listings').all().map((r) => r.code))
+    const list = await fetchListingAnnouncements(20, known)
     for (const a of list) {
       await upsertListing({ code: a.code, symbol: a.symbol, title: a.title, date: a.date, market: 'announce', source: 'announcement' })
       if (isSameDay(a.date, Date.now())) await notify({ code: a.code, symbol: a.symbol, title: a.title, date: a.date })

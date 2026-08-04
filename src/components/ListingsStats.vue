@@ -114,6 +114,7 @@ function renderChart() {
   }))
   barByTime = new Map(filteredMonths.value.map((m) => [monthStartTime(m.key), { key: m.key, label: m.label, count: m.items.length }]))
   histSeries.setData(data)
+  chart.timeScale().fitContent()
 }
 
 function openChart(it) {

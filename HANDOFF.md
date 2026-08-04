@@ -112,8 +112,10 @@
 
 7. **苛刻规则会命中为 0**：先放宽判定 + 「未命中也要显示该列数值/箭头」，否则用户看着全空以为是 bug。
 
-8. **GitHub 网络不稳**：push 卡住先 `git status -sb` 看是否 `ahead`；重试或强制 HTTP/1.1。**不要因此丢提交**——commit 成功但 push 失败时，推送可稍后重试，本地已安全。
+8. **lightweight-charts 不会自动 fit 内容，默认把 bar 挤在右侧**。`setData()` 后必须调用 `chart.timeScale().fitContent()`，否则柱状图只有最右侧几十像素有柱、其余空白，`subscribeClick`/`subscribeCrosshairMove` 拿到的 `param.time` 会是 `undefined`（点击空白区返回 null），点击柱图看似"没反应"。已用无头 Chrome + CDP 真实点击复现并修复（月度上新柱状图）。调试此类问题可用：无头 Chrome 加 `Input.dispatchMouseEvent` 派发受信点击，或直接读 `chart.timeScale().coordinateToTime(x)`。
 
-9. **本机（开发者 Mac）访问不到币安 Api**:不要用「本机 curl 正常」来判断线上行为；线上验证需靠服务器日志 / 用户实测。改动合入前用 stub fetch + 合成数据做逻辑自测，并在注释里写明「线上未实测」。
+9. **GitHub 网络不稳**：push 卡住先 `git status -sb` 看是否 `ahead`；重试或强制 HTTP/1.1。**不要因此丢提交**——commit 成功但 push 失败时，推送可稍后重试，本地已安全。
 
-10. 删除 `data/app.db` 会一起丢掉 SMTP 配置、密码、上新记录，务必谨慎；演示/测试用尽量只清缓存表而非整个库。
+10. **本机（开发者 Mac）访问不到币安 Api**:不要用「本机 curl 正常」来判断线上行为；线上验证需靠服务器日志 / 用户实测。改动合入前用 stub fetch + 合成数据做逻辑自测，并在注释里写明「线上未实测」。
+
+11. 删除 `data/app.db` 会一起丢掉 SMTP 配置、密码、上新记录，务必谨慎；演示/测试用尽量只清缓存表而非整个库。

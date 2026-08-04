@@ -111,10 +111,11 @@ app.post('/api/screener', async (req, res) => {
 })
 
 app.get('/api/listings', (_req, res) => {
-  const twoYearsAgo = Date.now() - 730 * 24 * 3600 * 1000
+  const now = new Date()
+  const cutoff = new Date(now.getFullYear(), now.getMonth() - 47, 1).getTime()
   const rows = db
     .prepare('SELECT symbol, date FROM listings WHERE date >= ? ORDER BY date ASC')
-    .all(twoYearsAgo)
+    .all(cutoff)
   const map = new Map()
   for (const r of rows) {
     const d = new Date(r.date)
@@ -122,9 +123,8 @@ app.get('/api/listings', (_req, res) => {
     if (!map.has(key)) map.set(key, [])
     map.get(key).push({ symbol: r.symbol, date: new Date(r.date).toISOString() })
   }
-  const now = new Date()
   const months = []
-  for (let i = 23; i >= 0; i--) {
+  for (let i = 47; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     months.push({ key, label: `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}`, items: map.get(key) || [] })

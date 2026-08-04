@@ -184,7 +184,7 @@ function parseListedSymbol(title) {
 }
 
 export async function fetchListingAnnouncements(maxPages = 40) {
-  const twoYearsAgo = Date.now() - 730 * 24 * 3600 * 1000
+  const fourYearsAgo = Date.now() - 4 * 366 * 24 * 3600 * 1000
   const seen = new Map()
   let page = 1
   let consecutiveFailures = 0
@@ -195,7 +195,7 @@ export async function fetchListingAnnouncements(maxPages = 40) {
       const res = await getJson(`${ANNOUNCE}?${params}`)
       const articles = res.data?.catalog?.articles || res.data?.articles || []
       if (!articles.length) break
-      if (new Date(articles[0].releaseDate).getTime() < twoYearsAgo) break
+      if (new Date(articles[0].releaseDate).getTime() < fourYearsAgo) break
       for (const a of articles) {
         if (!seen.has(a.code)) seen.set(a.code, a)
       }

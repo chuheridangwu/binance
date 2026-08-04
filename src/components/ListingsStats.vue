@@ -74,7 +74,7 @@ function initChart() {
     lastValueVisible: false,
     priceFormat: { type: 'price', precision: 0, minMove: 1 },
   })
-  chart.timeScale().applyOptions({ rightOffset: 3, barSpacing: 26 })
+  chart.timeScale().applyOptions({ rightOffset: 3 })
 
   chart.subscribeCrosshairMove((p) => {
     if (!p.time || !p.point) {
@@ -114,7 +114,11 @@ function renderChart() {
   }))
   barByTime = new Map(filteredMonths.value.map((m) => [monthStartTime(m.key), { key: m.key, label: m.label, count: m.items.length }]))
   histSeries.setData(data)
-  chart.timeScale().fitContent()
+  const el = document.querySelector('#month-chart')
+  const width = (el?.clientWidth || 720) - 8
+  const n = Math.max(data.length, 1)
+  const spacing = Math.max(18, Math.floor(width / (n + 3)))
+  chart.timeScale().applyOptions({ barSpacing: spacing, rightOffset: 3 })
 }
 
 function openChart(it) {
@@ -165,7 +169,7 @@ watch(
 <template>
   <div class="stats">
     <div class="head">
-      <h2>币安近 2 年每月上新统计（合约）</h2>
+      <h2>币安近 4 年每月上新统计（合约）</h2>
       <span class="note">共 {{ total }} 个（U本位永续，服务器已预计算）</span>
       <span v-if="generatedAt" class="note right">数据更新：{{ new Date(generatedAt).toLocaleString('zh-CN') }}</span>
     </div>
@@ -177,7 +181,7 @@ watch(
     <div v-else-if="error" class="hint err">{{ error }}</div>
     <div v-else class="content">
       <div class="cards">
-        <div class="card"><div class="num">{{ summary.total }}</div><div class="label">两年总上币</div></div>
+        <div class="card"><div class="num">{{ summary.total }}</div><div class="label">四年总上币</div></div>
         <div class="card"><div class="num">{{ summary.thisYear }}</div><div class="label">{{ thisYearKey }} 年上币</div></div>
         <div class="card"><div class="num">{{ summary.thisMonth }}</div><div class="label">本月上币</div></div>
         <div class="card"><div class="num">{{ summary.last30 }}</div><div class="label">近 30 天上币</div></div>
@@ -205,7 +209,10 @@ watch(
               <span class="cnt">{{ t.count }} 个</span>
             </li>
           </ol>
-          <h3 class="year-title">年度对比</h3>
+        </div>
+
+        <div class="card">
+          <h3>年度对比</h3>
           <table class="year-tbl">
             <tbody>
               <tr v-for="[y, c] in yearly" :key="y">
@@ -311,13 +318,16 @@ watch(
 }
 .grid {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 16px;
 }
 @media (max-width: 1000px) {
   .grid {
     grid-template-columns: 1fr;
   }
+}
+.card.wide {
+  grid-column: 1 / -1;
 }
 .card {
   background: #101417;
@@ -392,9 +402,6 @@ watch(
 .rank .cnt {
   color: #848e9c;
   font-size: 12px;
-}
-.year-title {
-  margin-top: 16px !important;
 }
 .year-tbl {
   width: 100%;

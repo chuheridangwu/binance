@@ -11,4 +11,5 @@ services:
       - TZ=Asia/Shanghai
       # 仅首次启动时用作初始密码；留空则自动生成（写入 data/INITIAL_PASSWORD.txt）。
       # 之后一律以页面「监控设置 → 修改登录密码」为准，重启不会覆盖。
-      - ADMIN_PASS=
+      # 密码写在 /opt/binance/.env 的 ADMIN_PASS=xxx（该文件已被 .gitignore，不进 git，不会引起合并冲突）
+      - ADMIN_PASS=${ADMIN_PASS:-}

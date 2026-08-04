@@ -78,7 +78,7 @@ bash deploy.sh
 
 ### 登录密码
 
-- **首次启动**：`docker-compose.yml` 里 `ADMIN_PASS` 作为初始密码；留空则自动生成并写入 `data/INITIAL_PASSWORD.txt`
+- **首次启动**：`ADMIN_PASS` 作为初始密码，写在 `/opt/binance/.env`（推荐）或环境变量；留空则自动生成并写入 `data/INITIAL_PASSWORD.txt`
 - **之后修改**：一律用页面「监控设置 → 修改登录密码」，保存即生效、重启不会被覆盖
 - 忘记密码时：停容器后在数据库删除该键再启动，会重新生成：
   ```bash
@@ -86,6 +86,8 @@ bash deploy.sh
   sqlite3 /opt/binance/data/app.db "DELETE FROM settings WHERE key='admin_pass';"
   docker compose up -d
   ```
+
+> **重要**：不要把 `ADMIN_PASS` 直接写进 `docker-compose.yml`。该文件被 git 跟踪，服务器上手动改它会导致 `git pull` 永久失败、自动部署每分钟重复重建（详见下方自动更新章节）。密码请写到 gitignore 的 `.env` 文件里：`echo 'ADMIN_PASS=你的密码' > /opt/binance/.env`
 
 ### 配置 SMTP 邮件
 
@@ -111,7 +113,12 @@ QQ 邮箱需先在网页版「设置 → 账户 → 开启 POP3/SMTP 服务」�
 cd /opt/binance || exit 1
 git fetch origin main >/dev/null 2>&1
 if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
-  git pull --ff-only
+  # 丢弃被 git 跟踪文件的本地改动（本地配置都在 .env 和 data/，均被 gitignore，不会受影响）
+  git checkout -- . 2>/dev/null || true
+  if ! git pull --ff-only; then
+    echo "[deploy] $(date '+%F %T') git pull 失败，跳过本次部署"
+    exit 1
+  fi
   export PATH="$PATH:/usr/local/bin:/usr/bin"
   if docker compose version >/dev/null 2>&1; then
     docker compose up -d --build
@@ -126,6 +133,8 @@ fi
 ```
 
 之后本地 `git push`，1 分钟内服务器自动 `git pull` + 重建容器，执行日志可在 1Panel 计划任务中查看。
+
+> **排查提示**：如果日志里出现 `Your local changes ... would be overwritten by merge` 并伴随「无更新却反复构建」，说明服务器上有被跟踪文件的本地改动（通常是手动改了 `docker-compose.yml`）。先手动清理：`cd /opt/binance && git checkout -- .`，再把 `ADMIN_PASS` 移到 `.env`，下次 push 即可恢复正常。
 
 ## 备份与恢复
 

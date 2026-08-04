@@ -48,6 +48,8 @@ const topMonths = computed(() =>
     .slice(0, 5)
 )
 
+const activeMonth = computed(() => filteredMonths.value.find((m) => m.key === expanded.value) || null)
+
 let chart = null
 let histSeries = null
 let barByTime = new Map()
@@ -198,6 +200,14 @@ watch(
           <h3>每月上币量</h3>
           <div id="month-chart" class="month-chart"></div>
           <div class="axis">点击柱状图查看当月明细，搜索可过滤</div>
+          <div v-if="activeMonth" class="month-detail">
+            <h4>{{ activeMonth.label }}（{{ activeMonth.items.length }} 个）</h4>
+            <div class="tags">
+              <span v-for="it in activeMonth.items" :key="it.symbol" class="tag" @click="openChart(it)">
+                {{ it.symbol }} <small>{{ String(it.date).slice(0, 10) }}</small>
+              </span>
+            </div>
+          </div>
         </div>
 
         <div class="card">
@@ -223,17 +233,6 @@ watch(
             </tbody>
           </table>
         </div>
-      </div>
-
-      <div v-for="m in filteredMonths" :key="m.key" class="month-detail">
-        <template v-if="expanded === m.key">
-          <h4>{{ m.label }}（{{ m.items.length }} 个）</h4>
-          <div class="tags">
-            <span v-for="it in m.items" :key="it.symbol" class="tag" @click="openChart(it)">
-              {{ it.symbol }} <small>{{ String(it.date).slice(0, 10) }}</small>
-            </span>
-          </div>
-        </template>
       </div>
     </div>
   </div>
@@ -454,9 +453,14 @@ watch(
   font-size: 13px;
   padding: 20px 0;
 }
+.month-detail {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #2b3139;
+}
 .month-detail h4 {
   color: #eaecef;
-  margin: 16px 0 8px;
+  margin: 0 0 8px;
   font-size: 14px;
 }
 .tags {

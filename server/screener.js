@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { db } from './db.js'
 import { getPerpetualSymbols, getFuturesKlines, getOpenInterestHistory } from './binance.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -169,7 +170,25 @@ async function mapLimit(items, limit, fn) {
   return out
 }
 
-export async function scan(rules, mode = 'any') {
+function monthKey(ts) {
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function buildListingDates() {
+  const futures = {}
+  const announce = {}
+  for (const r of db.prepare('SELECT symbol, date, market FROM listings').all()) {
+    const target = r.market === 'futures' ? futures : announce
+    if (!(r.symbol in target) || r.date < target[r.symbol]) target[r.symbol] = r.date
+  }
+  return function listingDate(sym) {
+    if (sym in futures) return futures[sym]
+    return sym in announce ? announce[sym] : null
+  }
+}
+
+export async function scan(rules, mode = 'any', opts = {}) {
   if (state.running) throw new Error('已有扫描进行中，请稍候')
   const enabled = Object.entries(rules)
     .filter(([, v]) => v)
@@ -184,15 +203,26 @@ export async function scan(rules, mode = 'any') {
   state.startAt = Date.now()
   try {
     const symbols = await getPerpetualSymbols()
-    state.total = symbols.length
+    const listingDate = buildListingDates()
+    const month = (opts.month || '').trim()
+    let candidates = symbols
+    if (month) {
+      if (!/^\d{4}-\d{2}$/.test(month)) throw new Error('月份格式应为 YYYY-MM')
+      candidates = symbols.filter((s) => {
+        const d = listingDate(s)
+        return d !== null && d !== undefined && monthKey(d) === month
+      })
+    }
+    state.total = candidates.length
     const results = []
 
-    await mapLimit(symbols, 4, async (sym) => {
+    await mapLimit(candidates, 4, async (sym) => {
       try {
         const kl = await getFuturesKlines(sym, '1d', 100)
         if (kl.length < 40) return
         const closes = kl.map((k) => k.close)
         const rsi6 = rsiSeries(closes, 6)
+        const listed = listingDate(sym)
         const detail = {}
         const hit = []
 
@@ -232,7 +262,7 @@ export async function scan(rules, mode = 'any') {
         }
 
         if (hit.length && (mode === 'any' || hit.length === enabled.length)) {
-          results.push({ symbol: sym, price: closes[closes.length - 1], matched: hit, detail })
+          results.push({ symbol: sym, listed: listed ? monthKey(listed) : '', price: closes[closes.length - 1], matched: hit, detail })
           state.found = results.length
         }
       } catch {
@@ -242,7 +272,7 @@ export async function scan(rules, mode = 'any') {
     })
 
     results.sort((a, b) => b.matched.length - a.matched.length)
-    lastResults = { mode, rules: enabled, results, generatedAt: Date.now() }
+    lastResults = { mode, rules: enabled, month: (opts.month || '').trim(), results, generatedAt: Date.now() }
     persistResults()
     return lastResults
   } finally {

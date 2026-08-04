@@ -103,7 +103,8 @@ app.post('/api/screener', async (req, res) => {
       r5: !!req.body.r5,
     }
     const mode = req.body.mode === 'all' ? 'all' : 'any'
-    const result = await screener.scan(rules, mode)
+    const month = typeof req.body.month === 'string' ? req.body.month : ''
+    const result = await screener.scan(rules, mode, { month })
     res.json({ ok: true, ...result, state: screener.getScanState() })
   } catch (e) {
     res.status(400).json({ error: e.message })

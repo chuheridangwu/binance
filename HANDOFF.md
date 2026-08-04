@@ -58,6 +58,11 @@
 - `notify()` 改为：已发不重复；失败保留 `notified=0`；**每 30 分钟限速重试、最多 10 次后放弃**（放弃会写进 `scanErrors`）。
 - 新增 `retryPendingNotifications()`，随 `runOnce()` 每次扫描执行：重发「近 2 天内、未通知、未超限」的记录，并按「已通知 symbol 集合」去重，避免同一币种走 市场diff/公告 两条路径重复发信。这同时兜住了「23:59 上线过零点被 `isSameDay` 漏掉」的边缘情况。
 
+### 指标选股「上架月份」过滤
+- `scan(rules, mode, { month })` 新增第三参；`month` 为 `YYYY-MM`，仅扫描该月上架合约（`buildListingDates()` 从 `listings` 表建 symbol→日期 映射，优先 `market='futures'` 行即合约首次K线时间，缺失回退公告日期）；结果行带 `listed`（上架月份），meta 带 `month`。
+- 前端：`ScreenerPanel.vue` 增加月份选择器（`<input type="month">`）+ 清空按钮 + 「上架」列；`startScreener(rules, mode, month)` 传参。月份校验正则 `^\d{4}-\d{2}$`。
+- 月份边界按服务器时区（Docker=UTC）计算，月底最后 1 小时上架可能 ±1 月。
+
 **部署状态**：服务器 `/opt/binance` 已完成清理并运行**最新代码**，每次 `git push` 后约 1 分钟内自动生效。若后续出现「服务器无更新」，优先怀疑 `.env` 被误改或 docker-compose 相关文件被抓改（见第 5 节坑 1/2）。
 
 ### 踩过的坑的修复记录（对应第 5 节）

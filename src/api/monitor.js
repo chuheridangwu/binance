@@ -57,11 +57,11 @@ export function fetchSpread(symbols) {
   return api(`/api/spread?symbols=${encodeURIComponent(q)}`)
 }
 
-export function startScreener(rules, mode) {
+export function startScreener(rules, mode, month) {
   return api('/api/screener', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...rules, mode }),
+    body: JSON.stringify({ ...rules, mode, month: month || '' }),
   })
 }
 

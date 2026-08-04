@@ -13,6 +13,7 @@ const RULES = [
 
 const checked = ref({ r1: true, r2: true, r3: true, r4: true, r5: true })
 const mode = ref('any')
+const month = ref('')
 const loading = ref(false)
 const error = ref('')
 const rows = ref([])
@@ -97,7 +98,7 @@ async function run() {
   stopPoll()
   timer = setInterval(poll, 1000)
   try {
-    const res = await startScreener({ ...checked.value }, mode.value)
+    const res = await startScreener({ ...checked.value }, mode.value, month.value)
     applyRows(res.results)
     meta.value = res
   } catch (e) {
@@ -147,8 +148,11 @@ onBeforeUnmount(stopPoll)
         <button :class="{ active: mode === 'any' }" :disabled="loading" @click="mode = 'any'">任一满足</button>
         <button :class="{ active: mode === 'all' }" :disabled="loading" @click="mode = 'all'">全部满足</button>
       </div>
-      <span class="note">已勾选 {{ enabledCount }} 个规则 · 全量约 400+ 合约，为防 IP 限流已强制降速，首次约需 2-4 分钟</span>
-      <span v-if="meta" class="note right">最近扫描 {{ new Date(meta.generatedAt).toLocaleString('zh-CN') }}，命中 {{ rows.length }} 个</span>
+      <span class="mode-label">上架月份：</span>
+      <input v-model="month" type="month" class="month-input" :disabled="loading" title="仅筛选在指定月份于币安上架的合约，留空则不限制" />
+      <button v-if="month" class="clear-btn" :disabled="loading" @click="month = ''">清空</button>
+      <span class="note">已勾选 {{ enabledCount }} 个规则 · 全量约 400+ 合约，为防 IP 限流已强制降速，首次约需 2-4 分钟；选择上架月份后只扫描该月上架的合约</span>
+      <span v-if="meta" class="note right">最近扫描 {{ new Date(meta.generatedAt).toLocaleString('zh-CN') }}，命中 {{ rows.length }} 个<span v-if="meta.month">（上架 {{ meta.month }}）</span></span>
     </div>
 
     <div v-if="progress && loading" class="progress">
@@ -168,6 +172,7 @@ onBeforeUnmount(stopPoll)
         <thead>
           <tr>
             <th>币种</th>
+            <th>上架</th>
             <th v-for="r in RULES" :key="r.id" :class="{ off: !checked[r.id] }" :title="r.desc">{{ r.name }}</th>
           </tr>
         </thead>
@@ -177,6 +182,7 @@ onBeforeUnmount(stopPoll)
               {{ r.symbol }}
               <span class="price-sub">{{ fmtPrice(r.price) }}</span>
             </td>
+            <td class="listed">{{ r.listed || '—' }}</td>
             <td v-for="rule in RULES" :key="rule.id">
               <template v-if="r.cells[rule.id].avail">
                 <b :class="r.cells[rule.id].hit ? 'up' : 'norm'">{{ r.cells[rule.id].text }}</b>
@@ -290,6 +296,39 @@ onBeforeUnmount(stopPoll)
   color: #848e9c;
   font-size: 12px;
 }
+.month-input {
+  background: #1e2329;
+  border: 1px solid #2b3139;
+  border-radius: 6px;
+  color: #eaecef;
+  padding: 4px 8px;
+  font-size: 13px;
+  color-scheme: dark;
+}
+.month-input:focus {
+  border-color: #f0b90b;
+  outline: none;
+}
+.month-input:disabled {
+  opacity: 0.6;
+}
+.clear-btn {
+  background: transparent;
+  border: 1px solid #2b3139;
+  color: #848e9c;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.clear-btn:hover {
+  color: #f0b90b;
+  border-color: #f0b90b;
+}
+.clear-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .note.right {
   margin-left: auto;
 }
@@ -358,6 +397,11 @@ onBeforeUnmount(stopPoll)
 .sym {
   color: #f0b90b;
   font-weight: 600;
+}
+.listed {
+  color: #848e9c;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 12px;
 }
 .price-sub {
   display: block;

@@ -42,6 +42,21 @@ function stopPoll() {
   }
 }
 
+function fmtPrice(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—'
+  if (v >= 1000) return v.toFixed(2)
+  if (v >= 1) return v.toFixed(4)
+  if (v >= 0.0001) return v.toFixed(6)
+  return v.toFixed(8)
+}
+
+function fmtOi(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—'
+  if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B'
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M'
+  return v.toFixed(0)
+}
+
 function buildCells(row) {
   const cells = {}
   for (const id of ['r1', 'r2', 'r3', 'r4', 'r5']) {

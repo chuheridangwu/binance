@@ -139,10 +139,13 @@ export function checkR3(closes) {
 }
 
 export function checkR4(oiList) {
-  if (!oiList || oiList.length < 5) return { hit: false, oiList: oiList || [] }
+  if (!oiList || oiList.length < 5) return { hit: false, oiList: oiList || [], upCount: 0, netUp: false }
   const last5 = oiList.slice(-5)
-  const inc = last5.every((v, i) => i === 0 || v > last5[i - 1])
-  return { hit: inc, oiList: last5 }
+  const ups = []
+  for (let i = 1; i < last5.length; i++) ups.push(last5[i] > last5[i - 1])
+  const upCount = ups.filter(Boolean).length
+  const netUp = last5[last5.length - 1] > last5[0]
+  return { hit: netUp && upCount >= 3, oiList: last5, upCount, netUp }
 }
 
 export function checkR5(klines) {
@@ -217,10 +220,8 @@ export async function scan(rules, mode = 'any') {
         if (rules.r4) {
           const oi = await getOpenInterestHistory(sym, '1d', 5)
           const r = checkR4(oi.map((o) => o.oi))
-          if (r.hit) {
-            hit.push('r4')
-            detail.r4 = r
-          }
+          detail.r4 = r
+          if (r.hit) hit.push('r4')
         }
         if (rules.r5) {
           const r = checkR5(kl)

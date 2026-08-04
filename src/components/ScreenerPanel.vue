@@ -72,8 +72,10 @@ function buildCells(row) {
     } else if (rid === 'r3') {
       cells.r3 = { text: `价 ${fmtPrice(d.price)} ≥ 上轨 ${fmtPrice(d.upper)}`, hit: true, avail: true }
     } else if (rid === 'r4') {
-      const last = d.oiList.length ? d.oiList[d.oiList.length - 1] : null
-      cells.r4 = { text: `OI ${fmtOi(last)} 逐日升`, hit: true, avail: true }
+      const list = d.oiList || []
+      const last = list.length ? list[list.length - 1] : null
+      const trend = list.length >= 2 ? (last > list[0] ? '↑' : last < list[0] ? '↓' : '→') : ''
+      cells.r4 = { text: `OI ${fmtOi(last)} ${trend}`, hit: d.hit === true, avail: list.length > 0 }
     } else if (rid === 'r5') {
       cells.r5 = { text: `量比 ${Number(d.ratio).toFixed(1)}x`, hit: true, avail: true }
     }
@@ -177,14 +179,14 @@ onBeforeUnmount(stopPoll)
             </td>
             <td v-for="rule in RULES" :key="rule.id">
               <template v-if="r.cells[rule.id].avail">
-                <b class="up">{{ r.cells[rule.id].text }}</b>
+                <b :class="r.cells[rule.id].hit ? 'up' : 'norm'">{{ r.cells[rule.id].text }}</b>
               </template>
               <template v-else>—</template>
             </td>
           </tr>
         </tbody>
       </table>
-      <div class="tips">点击行跳转行情图表。绿色列=命中规则；「—」表示未命中或该规则未勾选（未勾选列标题置灰）。已内置币安限流保护：低并发+请求间隔+429/418 自动退避；K线/OI 缓存 1 小时并落盘（重启不丢），重复扫描直接复用、几乎零 API 消耗。</div>
+      <div class="tips">点击行跳转行情图表。绿色列=命中规则；OI 列显示最近 5 天的末值并带涨跌箭头（绿色=命中「持续增加」）；「—」表示该规则未勾选或无数据。已内置币安限流保护：低并发+请求间隔+429/418 自动退避；K线/OI 缓存 1 小时并落盘（重启不丢），重复扫描直接复用、几乎零 API 消耗。</div>
     </div>
   </div>
 </template>
@@ -366,6 +368,10 @@ onBeforeUnmount(stopPoll)
 }
 .up {
   color: #0ecb81;
+}
+.norm {
+  color: #eaecef;
+  font-weight: 400;
 }
 .tips {
   padding: 8px 12px;

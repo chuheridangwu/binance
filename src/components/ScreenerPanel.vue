@@ -39,6 +39,11 @@ let timer = null
 const enabledCount = computed(() => RULES.filter((r) => checked.value[r.id]).length)
 const currentStrategy = computed(() => STRATEGIES.find((s) => s.id === view.value))
 
+function ruleTitle(r) {
+  if (!r.param) return r.name
+  return r.name.replace(/N/g, String(params.value[r.id]))
+}
+
 const progress = computed(() => {
   const s = state.value
   if (!s || !s.total) return null
@@ -309,7 +314,7 @@ onBeforeUnmount(stopPoll)
       <div v-for="r in RULES" :key="r.id" class="rule">
         <label class="check">
           <input v-model="checked[r.id]" type="checkbox" :disabled="loading" />
-          <b>{{ r.name }}</b>
+          <b>{{ ruleTitle(r) }}</b>
         </label>
         <template v-if="r.param">
           <input
@@ -366,7 +371,7 @@ onBeforeUnmount(stopPoll)
           <tr v-if="view === 'rules'">
             <th>币种</th>
             <th>上架</th>
-            <th v-for="r in RULES" :key="r.id" :class="{ off: !checked[r.id] }" :title="r.desc">{{ r.name }}</th>
+            <th v-for="r in RULES" :key="r.id" :class="{ off: !checked[r.id] }" :title="r.desc">{{ ruleTitle(r) }}</th>
             <th>操作</th>
           </tr>
           <tr v-else>
@@ -380,7 +385,7 @@ onBeforeUnmount(stopPoll)
           <tr v-if="view === 'rules'" v-for="r in rows" :key="r.symbol" @click="openChart(r.symbol)">
             <td class="sym">
               {{ r.symbol }}
-              <span class="price-sub">{{ fmtPrice(r.price) }}</span>
+              <span class="price-sub">价 {{ fmtPrice(r.price) }} · RSI6 {{ r.rsi6 !== null && r.rsi6 !== undefined ? r.rsi6.toFixed(1) : '—' }}</span>
             </td>
             <td class="listed">{{ r.listed || '—' }}</td>
             <td v-for="rule in RULES" :key="rule.id">
@@ -407,7 +412,7 @@ onBeforeUnmount(stopPoll)
         </tbody>
       </table>
       <div class="tips">
-        <template v-if="view === 'rules'">点击行跳转行情图表。绿色列=命中规则；OI 列显示当日 OI > 前 N 日总和；「—」表示该规则未勾选或无数据。每条规则旁的 N 输入框可调整天数（R1/R2: 3-10，R4/R5: 3-7）。「追踪」可对命中合约设置目标价+截止时间，达到后自动邮件提醒。已内置币安限流保护：低并发+请求间隔+429/418 自动退避；K线/OI 缓存 1 小时并落盘（重启不丢），重复扫描直接复用、几乎零 API 消耗。</template>
+        <template v-if="view === 'rules'">点击行跳转行情图表。绿色列=命中规则；OI 列显示当日 OI > 前 N 日总和；「—」表示该规则未勾选或无数据。每条规则旁的 N 输入框可调整天数（R1/R2: 3-10，R4/R5: 3-7），列表标题随所选天数实时变化。「追踪」可对命中合约设置目标价+截止时间，达到后自动邮件提醒。排序规则：命中规则多的靠前，命中数相同的按 RSI6 从高到低。「RSI6」为当前最新 RSI(6) 值。已内置币安限流保护：低并发+请求间隔+429/418 自动退避；K线/OI 缓存 1 小时并落盘（重启不丢），重复扫描直接复用、几乎零 API 消耗。</template>
         <template v-else>点击行跳转行情图表。评分为 0-100 权重制，仅保留达到最低评分的合约，按评分降序排列。信号标签说明命中的子条件。布林列：「贴近上/下轨」指现价处于布林带区间顶/底 10% 内，「破上/下轨(近7日)」指近一周内收盘价越出过上/下轨。反转策略的资金费率来自币安批量接口（缺失显示 —），若线上字段结构与预期不符请告知。</template>
       </div>
     </div>

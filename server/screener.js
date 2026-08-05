@@ -561,7 +561,15 @@ export async function scan(rules, mode = 'any', opts = {}) {
         }
 
         if (hit.length && (mode === 'any' || hit.length === enabled.length)) {
-          results.push({ symbol: sym, listed: listed ? monthKey(listed) : '', price: closes[closes.length - 1], matched: hit, detail })
+          const curRsi6 = rsi6[rsi6.length - 1]
+          results.push({
+            symbol: sym,
+            listed: listed ? monthKey(listed) : '',
+            price: closes[closes.length - 1],
+            matched: hit,
+            detail,
+            rsi6: Number.isFinite(curRsi6) ? curRsi6 : null,
+          })
           state.found = results.length
         }
       } catch {
@@ -570,7 +578,10 @@ export async function scan(rules, mode = 'any', opts = {}) {
       state.done++
     })
 
-    results.sort((a, b) => b.matched.length - a.matched.length)
+    results.sort((a, b) => {
+      if (b.matched.length !== a.matched.length) return b.matched.length - a.matched.length
+      return (b.rsi6 ?? -1) - (a.rsi6 ?? -1)
+    })
     lastResults = { mode, rules: enabled, params, month: (opts.month || '').trim(), results, generatedAt: Date.now() }
     persistResults()
     return lastResults

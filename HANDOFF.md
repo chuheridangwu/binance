@@ -45,7 +45,7 @@
 ## 2. 我们已经完成了什么（全部已提交并推送）
 
 ### 规则参数化 + 持续追踪 + 定时扫描（2026-08 新增）
-- **规则参数化**：`server/screener.js` 的 `RULES` 增加 `param` 元数据（min/max/def），`checkR1/checkR2/checkR4/checkR5` 接受 `days` 参数；`scan(rules, mode, { month, params })` 按范围钳制参数（R1/R2: 3-10 默认 7/3，R4/R5: 3-7 默认 5/3）。**R4 语义变更**：从「近 5 天逐日上升」改为「当日 OI > 前 N 日总和」。前端规则行旁新增 N 天数输入框，`params` 随 `startScreener` 提交。导出 `RULE_DEFAULTS` 供定时扫描用。
+- **规则参数化**：`server/screener.js` 的 `RULES` 增加 `param` 元数据（min/max/def），`checkR1/checkR2/checkR4/checkR5` 接受 `days` 参数；`scan(rules, mode, { month, params })` 按范围钳制参数（R1/R2: 3-10 默认 7/3，R4/R5: 3-7 默认 5/3）。**R4 语义变更**：从「近 5 天逐日上升」改为「当日 OI > 前 N 日总和」。前端规则行旁新增 N 天数输入框，`params` 随 `startScreener` 提交。导出 `RULE_DEFAULTS` 供定时扫描用。**结果排序**：先按命中规则数降序，命中数相同按最新 RSI6 降序；结果行带 `rsi6` 字段，前端标题/行内展示。**规则标题随参数实时显示**（如选 3 天则显示「近3日」而非「近N日」，前端 `ruleTitle()`）。
 - **持续追踪（价格提醒）**：
   - `server/db.js` 新增 `trackers` 表（id/symbol/direction/target_price/expire_at/created_at/notified/notified_at；notified 0=追踪中 1=已触发 2=已过期）。
   - `server/trackers.js` 新建：`listTrackers` / `createTracker`（校验目标价>0、截止时间晚于当前）/ `deleteTracker` / `checkTrackers`（用 `getFuturesPrices()` 批量价格一次校验全部活跃追踪，命中发邮件并标记，过期标记 notified=2）。

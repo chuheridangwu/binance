@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { db } from './db.js'
-import { getPerpetualSymbols, getFuturesKlines, getOpenInterestHistory, getFundingRates, getLongShortRatio } from './binance.js'
+import { getPerpetualSymbols, getFuturesKlines, getOpenInterestHistory, getFundingRates } from './binance.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RESULTS_FILE = path.join(__dirname, '..', 'data', 'scan-results.json')
@@ -95,7 +95,11 @@ function stdDevSeries(values, period) {
 function bollinger(closes, period = 20, mult = 2) {
   const mid = smaSeries(closes, period)
   const sd = stdDevSeries(closes, period)
-  return { mid, upper: closes.map((_, i) => (Number.isFinite(mid[i]) ? mid[i] + mult * sd[i] : NaN)) }
+  return {
+    mid,
+    upper: closes.map((_, i) => (Number.isFinite(mid[i]) ? mid[i] + mult * sd[i] : NaN)),
+    lower: closes.map((_, i) => (Number.isFinite(mid[i]) ? mid[i] - mult * sd[i] : NaN)),
+  }
 }
 
 export function checkR1(rsi6) {
@@ -163,26 +167,26 @@ export const STRATEGIES = [
   {
     id: 'up',
     name: '上涨趋势',
-    desc: '多头排列 + 趋势强度 + 量能确认',
-    score: ['MA20>MA50>MA200(+30)', '价>MA20(+20)', 'ADX>25(+20)', 'RSI 50-70(+20)', '量比>1(+10)'],
+    desc: '多头排列 + 趋势强度 + 量能 + 布林上轨',
+    score: ['MA20>MA50>MA200(+25)', '价>MA20(+15)', 'ADX>25(+15)', 'RSI 50-70(+15)', '量比>1(+10)', '贴近/破上轨(+20)'],
   },
   {
     id: 'down',
     name: '下跌趋势',
-    desc: '空头排列 + 趋势强度 + 量能确认',
-    score: ['MA20<MA50<MA200(+30)', '价<MA20(+20)', 'ADX>25(+20)', 'RSI<40(+20)', '量比>1(+10)'],
+    desc: '空头排列 + 趋势强度 + 量能 + 布林下轨',
+    score: ['MA20<MA50<MA200(+25)', '价<MA20(+15)', 'ADX>25(+15)', 'RSI<40(+15)', '量比>1(+10)', '贴近/破下轨(+20)'],
   },
   {
     id: 'top',
     name: '山顶转折',
-    desc: '超买 + 情绪拥挤（费率/多空比/OI）',
-    score: ['RSI(6)≥80(+25)', '乖离>10%(+20)', '资金费率>0.05%(+20)', '多空比>1.5(+15)', 'OI冲高滞涨(+20)'],
+    desc: '超买 + 资金费率 + 布林上轨',
+    score: ['RSI(6)≥80(+25)', '乖离>10%(+20)', '资金费率>0.05%(+15)', '贴近/破上轨(+40)'],
   },
   {
     id: 'bottom',
     name: '山底待涨',
-    desc: '超卖 + 情绪出清（费率/多空比/OI）',
-    score: ['RSI(6)≤20(+25)', '乖离<-10%(+20)', '资金费率<-0.05%(+20)', '多空比<0.8(+15)', 'OI见顶回落+放量(+20)'],
+    desc: '超卖 + 资金费率 + 布林下轨',
+    score: ['RSI(6)≤20(+25)', '乖离<-10%(+20)', '资金费率<-0.05%(+15)', '贴近/破下轨(+40)'],
   },
 ]
 
@@ -239,6 +243,23 @@ export function buildKlineFeatures(klines) {
   const avgVol = closes.slice(-20).reduce((a, _, i) => a + klines[n - 20 + i].volume, 0) / 20
   const dev20 = ma20 ? ((last.close - ma20) / ma20) * 100 : null
   const ret20 = n > 21 ? ((last.close - closes[n - 21]) / closes[n - 21]) * 100 : null
+  const bb = bollinger(closes)
+  const lastBb = n - 1
+  const u = bb.upper[lastBb]
+  const l = bb.lower[lastBb]
+  let nearUpper = false
+  let nearLower = false
+  if (Number.isFinite(u) && Number.isFinite(l) && u > l) {
+    const pos = (last.close - l) / (u - l)
+    nearUpper = pos >= 0.9
+    nearLower = pos <= 0.1
+  }
+  let brokeUpper = false
+  let brokeLower = false
+  for (let i = Math.max(0, n - 7); i < n; i++) {
+    if (Number.isFinite(bb.upper[i]) && closes[i] > bb.upper[i]) brokeUpper = true
+    if (Number.isFinite(bb.lower[i]) && closes[i] < bb.lower[i]) brokeLower = true
+  }
   return {
     price: last.close,
     ma20, ma50, ma200,
@@ -250,10 +271,14 @@ export function buildKlineFeatures(klines) {
     volRatio: avgVol ? last.volume / avgVol : null,
     hi20: Math.max(...closes.slice(-20)),
     lo20: Math.min(...closes.slice(-20)),
+    bollNearUpper: nearUpper,
+    bollNearLower: nearLower,
+    bollBrokeUpper: brokeUpper,
+    bollBrokeLower: brokeLower,
   }
 }
 
-// 顶部信号：RSI 超买 + 乖离 + 资金费率 + 多空比 + OI
+// 顶部信号：RSI 超买 + 乖离 + 资金费率 + 布林上轨
 export function scoreTop(f) {
   let s = 0
   const sig = []
@@ -261,11 +286,9 @@ export function scoreTop(f) {
   else if (f.rsi6 >= 70) { s += 15; sig.push('RSI6≥70') }
   if (f.dev20 !== null && f.dev20 >= 10) { s += 20; sig.push(`乖离+${f.dev20.toFixed(1)}%`) }
   else if (f.dev20 !== null && f.dev20 >= 6) { s += 12; sig.push(`乖离+${f.dev20.toFixed(1)}%`) }
-  if (f.fundingRate !== null && f.fundingRate >= 0.05) { s += 20; sig.push('费率拥挤') }
-  else if (f.fundingRate !== null && f.fundingRate >= 0.01) { s += 10; sig.push('费率偏高') }
-  if (f.lsRatio !== null && f.lsRatio > 1.5) { s += 15; sig.push(`多空比${f.lsRatio.toFixed(2)}`) }
-  else if (f.lsRatio !== null && f.lsRatio > 1.1) { s += 8; sig.push(`多空比${f.lsRatio.toFixed(2)}`) }
-  if (f.oiStall) { s += 20; sig.push('OI冲高滞涨') }
+  if (f.fundingRate !== null && f.fundingRate >= 0.05) { s += 15; sig.push('费率拥挤') }
+  else if (f.fundingRate !== null && f.fundingRate >= 0.01) { s += 8; sig.push('费率偏高') }
+  if (f.bollNearUpper || f.bollBrokeUpper) { s += 40; sig.push('贴/破上轨') }
   return { score: s, sig }
 }
 
@@ -276,56 +299,48 @@ export function scoreBottom(f) {
   else if (f.rsi6 <= 30) { s += 15; sig.push('RSI6≤30') }
   if (f.dev20 !== null && f.dev20 <= -10) { s += 20; sig.push(`乖离${f.dev20.toFixed(1)}%`) }
   else if (f.dev20 !== null && f.dev20 <= -6) { s += 12; sig.push(`乖离${f.dev20.toFixed(1)}%`) }
-  if (f.fundingRate !== null && f.fundingRate <= -0.05) { s += 20; sig.push('费率极负') }
-  else if (f.fundingRate !== null && f.fundingRate <= -0.01) { s += 10; sig.push('费率为负') }
-  if (f.lsRatio !== null && f.lsRatio < 0.8) { s += 15; sig.push(`多空比${f.lsRatio.toFixed(2)}`) }
-  else if (f.lsRatio !== null && f.lsRatio < 1) { s += 8; sig.push(`多空比${f.lsRatio.toFixed(2)}`) }
-  if (f.oiWashout) { s += 20; sig.push('OI见顶回落') }
+  if (f.fundingRate !== null && f.fundingRate <= -0.05) { s += 15; sig.push('费率极负') }
+  else if (f.fundingRate !== null && f.fundingRate <= -0.01) { s += 8; sig.push('费率为负') }
+  if (f.bollNearLower || f.bollBrokeLower) { s += 40; sig.push('贴/破下轨') }
   return { score: s, sig }
 }
 
 export function scoreUp(f) {
   let s = 0
   const sig = []
-  if (f.ma20 > f.ma50 && f.ma50 > f.ma200) { s += 30; sig.push('多头排列') }
-  else if (f.ma20 > f.ma50) { s += 15; sig.push('MA20>MA50') }
-  if (f.price > f.ma20) { s += 20; sig.push('价>MA20') }
-  if (f.adx !== null && f.adx > 25) { s += 20; sig.push(`ADX ${f.adx.toFixed(1)}`) }
-  if (f.rsi14 !== null && f.rsi14 >= 50 && f.rsi14 <= 70) { s += 20; sig.push(`RSI ${f.rsi14.toFixed(1)}`) }
-  else if (f.rsi14 !== null && f.rsi14 > 70) { s += 8; sig.push('RSI偏热') }
+  if (f.ma20 > f.ma50 && f.ma50 > f.ma200) { s += 25; sig.push('多头排列') }
+  else if (f.ma20 > f.ma50) { s += 12; sig.push('MA20>MA50') }
+  if (f.price > f.ma20) { s += 15; sig.push('价>MA20') }
+  if (f.adx !== null && f.adx > 25) { s += 15; sig.push(`ADX ${f.adx.toFixed(1)}`) }
+  if (f.rsi14 !== null && f.rsi14 >= 50 && f.rsi14 <= 70) { s += 15; sig.push(`RSI ${f.rsi14.toFixed(1)}`) }
+  else if (f.rsi14 !== null && f.rsi14 > 70) { s += 6; sig.push('RSI偏热') }
   if (f.volRatio !== null && f.volRatio > 1) { s += 10; sig.push(`量比${f.volRatio.toFixed(2)}`) }
+  if (f.bollNearUpper || f.bollBrokeUpper) { s += 20; sig.push('贴/破上轨') }
   return { score: s, sig }
 }
 
 export function scoreDown(f) {
   let s = 0
   const sig = []
-  if (f.ma20 < f.ma50 && f.ma50 < f.ma200) { s += 30; sig.push('空头排列') }
-  else if (f.ma20 < f.ma50) { s += 15; sig.push('MA20<MA50') }
-  if (f.price < f.ma20) { s += 20; sig.push('价<MA20') }
-  if (f.adx !== null && f.adx > 25) { s += 20; sig.push(`ADX ${f.adx.toFixed(1)}`) }
-  if (f.rsi14 !== null && f.rsi14 < 40) { s += 20; sig.push(`RSI ${f.rsi14.toFixed(1)}`) }
+  if (f.ma20 < f.ma50 && f.ma50 < f.ma200) { s += 25; sig.push('空头排列') }
+  else if (f.ma20 < f.ma50) { s += 12; sig.push('MA20<MA50') }
+  if (f.price < f.ma20) { s += 15; sig.push('价<MA20') }
+  if (f.adx !== null && f.adx > 25) { s += 15; sig.push(`ADX ${f.adx.toFixed(1)}`) }
+  if (f.rsi14 !== null && f.rsi14 < 40) { s += 15; sig.push(`RSI ${f.rsi14.toFixed(1)}`) }
   if (f.volRatio !== null && f.volRatio > 1) { s += 10; sig.push(`量比${f.volRatio.toFixed(2)}`) }
+  if (f.bollNearLower || f.bollBrokeLower) { s += 20; sig.push('贴/破下轨') }
   return { score: s, sig }
 }
 
-// OI 信号：冲高滞涨（顶）/ 见顶回落+放量（底）
-export function oiSignals(oiList, klines) {
-  if (!oiList || oiList.length < 6 || !klines || klines.length < 2) return { oiStall: false, oiWashout: false }
-  const vals = oiList.map((o) => o.oi)
-  const n = vals.length
-  const peak = Math.max(...vals)
-  const peakIdx = vals.indexOf(peak)
-  const lastVal = vals[n - 1]
-  const prevVal = vals[n - 2]
-  const lastK = klines[klines.length - 1]
-  const prevK = klines[klines.length - 2]
-  const pricePeak = peakIdx <= n - 3
-  const recentDecline = peak - lastVal > peak * 0.05
-  const oiStall = pricePeak && !recentDecline && lastVal >= vals[0]
-  const volSpike = lastK.volume > prevK.volume * 1.5
-  const oiWashout = recentDecline && lastK.close < prevK.close && volSpike
-  return { oiStall, oiWashout }
+export function bollLabel(f, dir) {
+  if (dir === 'up') {
+    if (f.bollBrokeUpper) return '破上轨(近7日)'
+    if (f.bollNearUpper) return '贴近上轨'
+    return '—'
+  }
+  if (f.bollBrokeLower) return '破下轨(近7日)'
+  if (f.bollNearLower) return '贴近下轨'
+  return '—'
 }
 
 export async function scanStrategies(strategies, opts = {}) {
@@ -376,32 +391,23 @@ export async function scanStrategies(strategies, opts = {}) {
           let res = null
           if (sid === 'up') {
             res = scoreUp(f)
-            row.metrics = { ...row.metrics, ma20: f.ma20, ma50: f.ma50, ma200: f.ma200, adx: f.adx, rsi14: f.rsi14, volRatio: f.volRatio, dev20: f.dev20 }
+            row.metrics = { ...row.metrics, ma20: f.ma20, ma50: f.ma50, ma200: f.ma200, adx: f.adx, rsi14: f.rsi14, volRatio: f.volRatio, dev20: f.dev20, boll: bollLabel(f, 'up') }
           } else if (sid === 'down') {
             res = scoreDown(f)
-            row.metrics = { ...row.metrics, ma20: f.ma20, ma50: f.ma50, ma200: f.ma200, adx: f.adx, rsi14: f.rsi14, volRatio: f.volRatio, dev20: f.dev20 }
+            row.metrics = { ...row.metrics, ma20: f.ma20, ma50: f.ma50, ma200: f.ma200, adx: f.adx, rsi14: f.rsi14, volRatio: f.volRatio, dev20: f.dev20, boll: bollLabel(f, 'down') }
           } else if (sid === 'top' || sid === 'bottom') {
             const overbought = (f.rsi6 !== null && f.rsi6 >= 70) || (f.dev20 !== null && f.dev20 >= 6)
             const oversold = (f.rsi6 !== null && f.rsi6 <= 30) || (f.dev20 !== null && f.dev20 <= -6)
             const isCandidate = sid === 'top' ? overbought : oversold
             if (!isCandidate) continue
             let fr = null
-            let ls = null
-            let oi = null
             try {
               const funding = await getFundingRates()
               fr = funding.get(sym) ?? null
             } catch { /* 费率不可用则忽略 */ }
-            try {
-              ls = await getLongShortRatio(sym)
-            } catch { /* 多空比不可用则忽略 */ }
-            try {
-              oi = await getOpenInterestHistory(sym, '1d', 10)
-            } catch { /* OI 不可用则忽略 */ }
-            const oiSig = oiSignals(oi, kl)
-            const full = { ...f, fundingRate: fr, lsRatio: ls ? ls.ratio : null, ...oiSig }
+            const full = { ...f, fundingRate: fr }
             res = sid === 'top' ? scoreTop(full) : scoreBottom(full)
-            row.metrics = { ...row.metrics, rsi6: f.rsi6, dev20: f.dev20, fundingRate: fr, lsRatio: full.lsRatio, oiLast: oi && oi.length ? oi[oi.length - 1].oi : null, oiStall: oiSig.oiStall, oiWashout: oiSig.oiWashout }
+            row.metrics = { ...row.metrics, rsi6: f.rsi6, dev20: f.dev20, fundingRate: fr, boll: bollLabel(f, sid === 'top' ? 'up' : 'down') }
           }
           if (res && res.score >= minScore) {
             row.strategy.push(sid)

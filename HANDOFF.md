@@ -19,10 +19,12 @@
 
 | 策略 | 评分构成 |
 |------|----------|
-| 上涨趋势 | MA20>MA50>MA200(+30) + 价>MA20(+20) + ADX>25(+20) + RSI 50-70(+20) + 量比>1(+10) |
-| 下跌趋势 | MA20<MA50<MA200(+30) + 价<MA20(+20) + ADX>25(+20) + RSI<40(+20) + 量比>1(+10) |
-| 山顶转折 | RSI(6)≥80(+25) + 乖离>10%(+20) + 资金费率>0.05%(+20) + 多空比>1.5(+15) + OI冲高滞涨(+20) |
-| 山底待涨 | RSI(6)≤20(+25) + 乖离<-10%(+20) + 资金费率<-0.05%(+20) + 多空比<0.8(+15) + OI见顶回落+放量(+20) |
+| 上涨趋势 | MA20>MA50>MA200(+25) + 价>MA20(+15) + ADX>25(+15) + RSI 50-70(+15) + 量比>1(+10) + 贴近/破上轨(+20) |
+| 下跌趋势 | MA20<MA50<MA200(+25) + 价<MA20(+15) + ADX>25(+15) + RSI<40(+15) + 量比>1(+10) + 贴近/破下轨(+20) |
+| 山顶转折 | RSI(6)≥80(+25) + 乖离>10%(+20) + 资金费率>0.05%(+15) + 贴近/破上轨(+40) |
+| 山底待涨 | RSI(6)≤20(+25) + 乖离<-10%(+20) + 资金费率<-0.05%(+15) + 贴近/破下轨(+40) |
+
+各策略满分均为 100。**布林条件定义**（`buildKlineFeatures` 的 `bollNearUpper/bollNearLower` 与 `bollBrokeUpper/bollBrokeLower`）：「贴近」= 现价处于布林带 (20,2) 区间顶/底 10% 内（`pos≥0.9` 或 `pos≤0.1`）；「破轨(近7日)」= 近 7 根日K收盘越出过上/下轨。反转策略已**去掉多空比与 OI 条件**（不再拉取 `getLongShortRatio`/OI），资金费率权重 15 分。
 
 **B. 规则扫描（旧功能保留）**：按 5 条技术指标规则筛选，可勾选、可切「任一/全部」，见下。
 
@@ -43,10 +45,10 @@
 ## 2. 我们已经完成了什么（全部已提交并推送）
 
 ### 四类策略筛选器（2026-08 新增）
-- `server/binance.js`：新增 `getFundingRates()`（`/premiumIndex` 无参一次取全市场，5min 内存缓存，Map symbol→lastFundingRate）与 `getLongShortRatio(symbol)`（`topLongShortAccountRatio?period=1d&limit=1`，10min Map 缓存，返回 `{ratio,long,short}` 或 null）。注意 `getFundingRates` 返回 **Map**，取值要用 `.get(sym)` 不是 `[sym]`。
+- `server/binance.js`：新增 `getFundingRates()`（`/premiumIndex` 无参一次取全市场，5min 内存缓存，Map symbol→lastFundingRate）与 `getLongShortRatio(symbol)`（`topLongShortAccountRatio?period=1d&limit=1`，10min Map 缓存，返回 `{ratio,long,short}` 或 null）。注意 `getFundingRates` 返回 **Map**，取值要用 `.get(sym)` 不是 `[sym]`。**`getLongShortRatio` 当前已无调用方**（多空比条件已从反转策略移除），保留备用。
 - `server/screener.js`：
-  - 新增 `STRATEGIES` 元数据、`buildKlineFeatures()`（MA20/50/200、RSI6/RSI14、ADX、乖离 dev20、量比、20日高低）、`adx()`（Wilder 平滑）、`scoreUp/scoreDown/scoreTop/scoreBottom`、`oiSignals()`（OI冲高滞涨/见顶回落）。
-  - 新增 `scanStrategies(strategies, { month, minScore })` 入口：趋势策略只用已落库日K（零新增请求）；反转策略先按 RSI/乖离初筛候选池 → 只对候选拉资金费率/多空比/OI。输出统一 `{symbol, listed, price, score, signals[], strategy[], metrics{}}`，持久化到同一 `data/scan-results.json`（meta.mode='strategies'）。
+  - 新增 `STRATEGIES` 元数据、`buildKlineFeatures()`（MA20/50/200、RSI6/RSI14、ADX、乖离 dev20、量比、20日高低、布林贴近/破轨标志）、`adx()`（Wilder 平滑）、`scoreUp/scoreDown/scoreTop/scoreBottom`、`bollLabel()`（布林列显示文案）。
+  - 新增 `scanStrategies(strategies, { month, minScore })` 入口：趋势策略只用已落库日K（零新增请求）；反转策略先按 RSI/乖离初筛候选池 → 只对候选拉资金费率（多空比/OI 已去掉，不再拉取）。输出统一 `{symbol, listed, price, score, signals[], strategy[], metrics{}}`，持久化到同一 `data/scan-results.json`（meta.mode='strategies'）。
 - `server/index.js`：`GET /api/screener` 附带 `strategies` 元数据；新增 `POST /api/screener/strategies`（body: `{strategies:[], month, minScore}`）。
 - `src/api/monitor.js`：新增 `startScreenerStrategies(strategies, month, minScore)`。
 - `src/components/ScreenerPanel.vue`：四个策略 Tab + 规则扫描 Tab；每个策略显示评分构成；最低评分可调；表格列评分/信号标签/指标列，点击行跳行情图。加载历史结果时若为 strategies 模式自动切到对应 Tab。

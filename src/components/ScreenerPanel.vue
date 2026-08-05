@@ -12,10 +12,10 @@ const RULES = [
 ]
 
 const STRATEGIES = [
-  { id: 'up', name: '上涨趋势', desc: '多头排列 + 趋势强度 + 量能确认', score: ['MA20>MA50>MA200 (+30)', '价>MA20 (+20)', 'ADX>25 (+20)', 'RSI 50-70 (+20)', '量比>1 (+10)'] },
-  { id: 'down', name: '下跌趋势', desc: '空头排列 + 趋势强度 + 量能确认', score: ['MA20<MA50<MA200 (+30)', '价<MA20 (+20)', 'ADX>25 (+20)', 'RSI<40 (+20)', '量比>1 (+10)'] },
-  { id: 'top', name: '山顶转折', desc: '超买 + 情绪拥挤（费率/多空比/OI）', score: ['RSI(6)≥80 (+25)', '乖离>10% (+20)', '资金费率>0.05% (+20)', '多空比>1.5 (+15)', 'OI冲高滞涨 (+20)'] },
-  { id: 'bottom', name: '山底待涨', desc: '超卖 + 情绪出清（费率/多空比/OI）', score: ['RSI(6)≤20 (+25)', '乖离<-10% (+20)', '资金费率<-0.05% (+20)', '多空比<0.8 (+15)', 'OI见顶回落+放量 (+20)'] },
+  { id: 'up', name: '上涨趋势', desc: '多头排列 + 趋势强度 + 量能 + 布林上轨', score: ['MA20>MA50>MA200 (+25)', '价>MA20 (+15)', 'ADX>25 (+15)', 'RSI 50-70 (+15)', '量比>1 (+10)', '贴近/破上轨 (+20)'] },
+  { id: 'down', name: '下跌趋势', desc: '空头排列 + 趋势强度 + 量能 + 布林下轨', score: ['MA20<MA50<MA200 (+25)', '价<MA20 (+15)', 'ADX>25 (+15)', 'RSI<40 (+15)', '量比>1 (+10)', '贴近/破下轨 (+20)'] },
+  { id: 'top', name: '山顶转折', desc: '超买 + 资金费率 + 布林上轨', score: ['RSI(6)≥80 (+25)', '乖离>10% (+20)', '资金费率>0.05% (+15)', '贴近/破上轨 (+40)'] },
+  { id: 'bottom', name: '山底待涨', desc: '超卖 + 资金费率 + 布林下轨', score: ['RSI(6)≤20 (+25)', '乖离<-10% (+20)', '资金费率<-0.05% (+15)', '贴近/破下轨 (+40)'] },
 ]
 
 const view = ref('up')
@@ -118,6 +118,7 @@ const strategyCols = {
     { key: 'rsi14', label: 'RSI14', fmt: (v) => fmtNum(v, 1) },
     { key: 'dev20', label: '乖离', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(1) + '%') },
     { key: 'volRatio', label: '量比', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(2) + 'x') },
+    { key: 'boll', label: '布林', fmt: (v) => (v === null || v === undefined ? '—' : v) },
   ],
   down: [
     { key: 'ma20', label: 'MA20', fmt: (v) => fmtPrice(v) },
@@ -127,20 +128,19 @@ const strategyCols = {
     { key: 'rsi14', label: 'RSI14', fmt: (v) => fmtNum(v, 1) },
     { key: 'dev20', label: '乖离', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(1) + '%') },
     { key: 'volRatio', label: '量比', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(2) + 'x') },
+    { key: 'boll', label: '布林', fmt: (v) => (v === null || v === undefined ? '—' : v) },
   ],
   top: [
     { key: 'rsi6', label: 'RSI6', fmt: (v) => fmtNum(v, 1) },
     { key: 'dev20', label: '乖离', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(1) + '%') },
     { key: 'fundingRate', label: '资金费率', fmt: (v) => fmtRate(v) },
-    { key: 'lsRatio', label: '多空比', fmt: (v) => fmtNum(v, 2) },
-    { key: 'oiLast', label: 'OI', fmt: (v) => fmtOi(v) },
+    { key: 'boll', label: '布林', fmt: (v) => (v === null || v === undefined ? '—' : v) },
   ],
   bottom: [
     { key: 'rsi6', label: 'RSI6', fmt: (v) => fmtNum(v, 1) },
     { key: 'dev20', label: '乖离', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(1) + '%') },
     { key: 'fundingRate', label: '资金费率', fmt: (v) => fmtRate(v) },
-    { key: 'lsRatio', label: '多空比', fmt: (v) => fmtNum(v, 2) },
-    { key: 'oiLast', label: 'OI', fmt: (v) => fmtOi(v) },
+    { key: 'boll', label: '布林', fmt: (v) => (v === null || v === undefined ? '—' : v) },
   ],
 }
 
@@ -314,7 +314,7 @@ onBeforeUnmount(stopPoll)
       </table>
       <div class="tips">
         <template v-if="view === 'rules'">点击行跳转行情图表。绿色列=命中规则；OI 列显示最近 5 天的末值并带涨跌箭头（绿色=命中「持续增加」）；「—」表示该规则未勾选或无数据。已内置币安限流保护：低并发+请求间隔+429/418 自动退避；K线/OI 缓存 1 小时并落盘（重启不丢），重复扫描直接复用、几乎零 API 消耗。</template>
-        <template v-else>点击行跳转行情图表。评分为 0-100 权重制，仅保留达到最低评分的合约，按评分降序排列。信号标签说明命中的子条件；转折策略的资金费率/多空比来自币安逐币数据接口（缺失显示 —），若线上字段结构与预期不符请告知。</template>
+        <template v-else>点击行跳转行情图表。评分为 0-100 权重制，仅保留达到最低评分的合约，按评分降序排列。信号标签说明命中的子条件。布林列：「贴近上/下轨」指现价处于布林带区间顶/底 10% 内，「破上/下轨(近7日)」指近一周内收盘价越出过上/下轨。反转策略的资金费率来自币安批量接口（缺失显示 —），若线上字段结构与预期不符请告知。</template>
       </div>
     </div>
   </div>

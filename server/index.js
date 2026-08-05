@@ -9,6 +9,7 @@ import { sendMail } from './mailer.js'
 import * as auth from './auth.js'
 import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 import * as screener from './screener.js'
+import { listTrackers, createTracker, deleteTracker } from './trackers.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -104,11 +105,35 @@ app.post('/api/screener', async (req, res) => {
     }
     const mode = req.body.mode === 'all' ? 'all' : 'any'
     const month = typeof req.body.month === 'string' ? req.body.month : ''
-    const result = await screener.scan(rules, mode, { month })
+    const params = req.body.params && typeof req.body.params === 'object' ? req.body.params : {}
+    const result = await screener.scan(rules, mode, { month, params })
     res.json({ ok: true, ...result, state: screener.getScanState() })
   } catch (e) {
     res.status(400).json({ error: e.message })
   }
+})
+
+app.get('/api/trackers', (_req, res) => {
+  res.json({ trackers: listTrackers() })
+})
+
+app.post('/api/trackers', (req, res) => {
+  try {
+    const t = createTracker({
+      symbol: req.body.symbol,
+      direction: req.body.direction,
+      target_price: req.body.target_price,
+      expire_at: req.body.expire_at,
+    })
+    res.json({ ok: true, tracker: t })
+  } catch (e) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
+app.delete('/api/trackers/:id', (req, res) => {
+  deleteTracker(req.params.id)
+  res.json({ ok: true })
 })
 
 app.post('/api/screener/strategies', async (req, res) => {

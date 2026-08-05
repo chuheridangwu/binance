@@ -2,6 +2,8 @@ import { db, getSetting, setSetting } from './db.js'
 import { getPerpetualSymbols, getFirstKlineTime, fetchListingAnnouncements } from './binance.js'
 import { sendMail } from './mailer.js'
 import { getSpreadData, DEFAULT_WATCH } from './spread.js'
+import { checkTrackers } from './trackers.js'
+import * as screener from './screener.js'
 
 const state = {
   lastCheck: 0,
@@ -18,6 +20,54 @@ const state = {
 const MAX_NOTIFY_ATTEMPTS = 10
 const NOTIFY_ATTEMPT_INTERVAL_MS = 30 * 60 * 1000
 const NOTIFY_RETRY_WINDOW_MS = 2 * 24 * 60 * 60 * 1000
+
+// 定时扫描：北京时间 00:01 / 04:01 / 12:01 / 16:01 / 20:01 各跑一次默认规则扫描
+const SCHEDULED_SLOTS = ['00:01', '04:01', '12:01', '16:01', '20:01']
+const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000
+
+function beijingClock() {
+  const d = new Date(Date.now() + BEIJING_OFFSET_MS)
+  const hh = String(d.getUTCHours()).padStart(2, '0')
+  const mm = String(d.getUTCMinutes()).padStart(2, '0')
+  const day = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+  return { hhmm: `${hh}:${mm}`, day }
+}
+
+async function scanScheduledDefault() {
+  const { hhmm, day } = beijingClock()
+  if (!SCHEDULED_SLOTS.includes(hhmm)) return
+  const key = `sched_scan_${day}_${hhmm}`
+  if (getSetting(key) === '1') return
+  setSetting(key, '1') // 占位防并发重复
+  const defaultRules = { r1: true, r2: true, r3: true, r4: true, r5: true }
+  const params = { ...screener.RULE_DEFAULTS }
+  let result
+  try {
+    result = await screener.scan(defaultRules, 'any', { params })
+  } catch (e) {
+    setSetting(key, '') // 扫描失败允许下次重试
+    state.scanErrors.push(`定时选股扫描失败: ${e.message}`)
+    state.scanErrors = state.scanErrors.slice(-20)
+    return
+  }
+  if (!result.results.length) return
+  const rows = result.results
+    .map((r) => `<tr><td>${r.symbol}</td><td>${r.listed || '—'}</td><td>${r.price}</td><td>${(r.matched || []).join(', ')}</td></tr>`)
+    .join('')
+  try {
+    await sendMail(
+      `【选股提醒】定时扫描命中 ${rows.length} 个合约（${hhmm} 北京时间）`,
+      `<p>定时默认规则扫描（北京时间 ${hhmm}）命中 ${rows.length} 个合约：</p>` +
+        `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse">` +
+        `<tr><th>币种</th><th>上架</th><th>现价</th><th>命中规则</th></tr>${rows}</table>` +
+        `<p>扫描时间：${new Date().toLocaleString('zh-CN')}</p>`
+    )
+    state.lastEmailAt = Date.now()
+    state.lastEmailTo = (getSetting('recipients') || '').split(/[,;，；\s]+/).filter(Boolean)
+  } catch (e) {
+    console.error('[mail] 定时选股邮件发送失败:', e.message)
+  }
+}
 
 export function getStatus() {
   state.totalListings = db.prepare('SELECT COUNT(*) AS n FROM listings').get().n
@@ -181,6 +231,8 @@ export async function runOnce() {
     if (Date.now() - state.lastSpreadScan > 5 * 60 * 1000) {
       await scanSpreads()
     }
+    await checkTrackers()
+    await scanScheduledDefault()
   } finally {
     state.lastCheck = Date.now()
     state.running = false

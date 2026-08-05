@@ -1,14 +1,14 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
-import { startScreener, startScreenerStrategies, screenerStatus, fetchScreenerResults } from '../api/monitor'
+import { startScreener, startScreenerStrategies, screenerStatus, fetchScreenerResults, fetchTrackers, createTracker, deleteTracker } from '../api/monitor'
 import { store } from '../store'
 
 const RULES = [
-  { id: 'r1', name: 'RSI(6) 一周内 ≥ 80', desc: '近 7 根日K中任意一根 RSI(6) ≥ 80' },
-  { id: 'r2', name: '3日内创新高 + RSI 顶背离', desc: '近 3 天价格创 60 天新高，RSI(6) 低于前高时取值' },
+  { id: 'r1', name: 'RSI(6) 近N日 ≥ 80', desc: '近 N 根日K中任意一根 RSI(6) ≥ 80', param: { name: 'N', min: 3, max: 10, def: 7 } },
+  { id: 'r2', name: 'N日内创新高 + RSI 顶背离', desc: '近 N 天价格创 60 天新高，RSI(6) 低于前高时取值', param: { name: 'N', min: 3, max: 10, def: 3 } },
   { id: 'r3', name: '价格 ≥ 布林带上轨', desc: '收盘价站上布林带 (20, 2) 上轨' },
-  { id: 'r4', name: 'OI 持续增加', desc: '永续未平仓合约量近 5 天逐日上升' },
-  { id: 'r5', name: '单日量 > 近7日总和', desc: '最近一根日K成交量大于之前 7 天之和' },
+  { id: 'r4', name: '当日 OI > 前N日总和', desc: '当日未平仓合约量大于之前 N 天 OI 之和', param: { name: 'N', min: 3, max: 7, def: 5 } },
+  { id: 'r5', name: '单日量 > 前N日总和', desc: '最近一根日K成交量大于之前 N 天成交量之和', param: { name: 'N', min: 3, max: 7, def: 3 } },
 ]
 
 const STRATEGIES = [
@@ -20,6 +20,7 @@ const STRATEGIES = [
 
 const view = ref('up')
 const checked = ref({ r1: true, r2: true, r3: true, r4: true, r5: true })
+const params = ref({ r1: 7, r2: 3, r4: 5, r5: 3 })
 const mode = ref('any')
 const month = ref('')
 const minScore = ref(60)
@@ -28,6 +29,11 @@ const error = ref('')
 const rows = ref([])
 const meta = ref(null)
 const state = ref(null)
+const trackers = ref([])
+const trackTarget = ref(null)
+const trackForm = ref({ direction: 'up', price: '', expire: '' })
+const trackSaving = ref(false)
+const trackError = ref('')
 let timer = null
 
 const enabledCount = computed(() => RULES.filter((r) => checked.value[r.id]).length)
@@ -100,8 +106,12 @@ function buildCells(row) {
     } else if (rid === 'r4') {
       const list = d.oiList || []
       const last = list.length ? list[list.length - 1] : null
-      const trend = list.length >= 2 ? (last > list[0] ? '↑' : last < list[0] ? '↓' : '→') : ''
-      cells.r4 = { text: `OI ${fmtOi(last)} ${trend}`, hit: d.hit === true, avail: list.length > 0 }
+      const prevSum = d.prevSum
+      cells.r4 = {
+        text: prevSum !== null ? `OI ${fmtOi(last)} > ${fmtOi(prevSum)}` : `OI ${fmtOi(last)}`,
+        hit: d.hit === true,
+        avail: list.length > 0,
+      }
     } else if (rid === 'r5') {
       cells.r5 = { text: `量比 ${Number(d.ratio).toFixed(1)}x`, hit: true, avail: true }
     }
@@ -164,7 +174,7 @@ async function run() {
   try {
     let res
     if (view.value === 'rules') {
-      res = await startScreener({ ...checked.value }, mode.value, month.value)
+      res = await startScreener({ ...checked.value }, mode.value, month.value, params.value)
     } else {
       res = await startScreenerStrategies([view.value], month.value, minScore.value)
     }
@@ -181,7 +191,74 @@ async function run() {
   }
 }
 
+async function loadTrackers() {
+  try {
+    const res = await fetchTrackers()
+    trackers.value = res.trackers || []
+  } catch {}
+}
+
+function openTrack(row) {
+  trackError.value = ''
+  trackForm.value = { direction: 'up', price: String(row.price), expire: '' }
+  trackTarget.value = row
+}
+
+async function saveTracker() {
+  if (trackSaving.value) return
+  const t = trackTarget.value
+  if (!t) return
+  const price = Number(trackForm.value.price)
+  const expire = trackForm.value.expire
+  if (!Number.isFinite(price) || price <= 0) {
+    trackError.value = '请输入有效的目标价'
+    return
+  }
+  if (!expire) {
+    trackError.value = '请选择截止时间'
+    return
+  }
+  const expireTs = new Date(expire).getTime()
+  if (!Number.isFinite(expireTs) || expireTs <= Date.now()) {
+    trackError.value = '截止时间必须晚于当前时间'
+    return
+  }
+  trackSaving.value = true
+  try {
+    await createTracker({
+      symbol: t.symbol,
+      direction: trackForm.value.direction,
+      target_price: price,
+      expire_at: expireTs,
+    })
+    trackTarget.value = null
+    await loadTrackers()
+  } catch (e) {
+    trackError.value = e.message || '保存失败'
+  } finally {
+    trackSaving.value = false
+  }
+}
+
+async function removeTracker(id) {
+  try {
+    await deleteTracker(id)
+    trackers.value = trackers.value.filter((t) => t.id !== id)
+  } catch {}
+}
+
+function trackerStatus(t) {
+  if (t.notified === 1) return { text: '已触发', cls: 'hit' }
+  if (t.notified === 2) return { text: '已过期', cls: 'expired' }
+  return { text: '追踪中', cls: 'active' }
+}
+
+function fmtExpire(ts) {
+  return new Date(ts).toLocaleString('zh-CN', { hour12: false })
+}
+
 onMounted(async () => {
+  loadTrackers()
   try {
     const res = await fetchScreenerResults()
     if (res.results && res.results.length) {
@@ -234,6 +311,17 @@ onBeforeUnmount(stopPoll)
           <input v-model="checked[r.id]" type="checkbox" :disabled="loading" />
           <b>{{ r.name }}</b>
         </label>
+        <template v-if="r.param">
+          <input
+            v-model.number="params[r.id]"
+            type="number"
+            class="param-input"
+            :min="r.param.min"
+            :max="r.param.max"
+            :disabled="loading || !checked[r.id]"
+            :title="`${r.param.name} 范围 ${r.param.min}-${r.param.max}，默认 ${r.param.def}`"
+          />
+        </template>
         <span class="desc">{{ r.desc }}</span>
       </div>
     </div>
@@ -279,6 +367,7 @@ onBeforeUnmount(stopPoll)
             <th>币种</th>
             <th>上架</th>
             <th v-for="r in RULES" :key="r.id" :class="{ off: !checked[r.id] }" :title="r.desc">{{ r.name }}</th>
+            <th>操作</th>
           </tr>
           <tr v-else>
             <th>币种</th>
@@ -300,6 +389,9 @@ onBeforeUnmount(stopPoll)
               </template>
               <template v-else>—</template>
             </td>
+            <td class="track-cell" @click.stop>
+              <button class="track-btn" @click="openTrack(r)">追踪</button>
+            </td>
           </tr>
           <tr v-for="r in rows" v-else :key="r.symbol" @click="openChart(r.symbol)">
             <td class="sym">
@@ -315,8 +407,47 @@ onBeforeUnmount(stopPoll)
         </tbody>
       </table>
       <div class="tips">
-        <template v-if="view === 'rules'">点击行跳转行情图表。绿色列=命中规则；OI 列显示最近 5 天的末值并带涨跌箭头（绿色=命中「持续增加」）；「—」表示该规则未勾选或无数据。已内置币安限流保护：低并发+请求间隔+429/418 自动退避；K线/OI 缓存 1 小时并落盘（重启不丢），重复扫描直接复用、几乎零 API 消耗。</template>
+        <template v-if="view === 'rules'">点击行跳转行情图表。绿色列=命中规则；OI 列显示当日 OI > 前 N 日总和；「—」表示该规则未勾选或无数据。每条规则旁的 N 输入框可调整天数（R1/R2: 3-10，R4/R5: 3-7）。「追踪」可对命中合约设置目标价+截止时间，达到后自动邮件提醒。已内置币安限流保护：低并发+请求间隔+429/418 自动退避；K线/OI 缓存 1 小时并落盘（重启不丢），重复扫描直接复用、几乎零 API 消耗。</template>
         <template v-else>点击行跳转行情图表。评分为 0-100 权重制，仅保留达到最低评分的合约，按评分降序排列。信号标签说明命中的子条件。布林列：「贴近上/下轨」指现价处于布林带区间顶/底 10% 内，「破上/下轨(近7日)」指近一周内收盘价越出过上/下轨。反转策略的资金费率来自币安批量接口（缺失显示 —），若线上字段结构与预期不符请告知。</template>
+      </div>
+    </div>
+
+    <div v-if="trackers.length" class="tracker-list">
+      <h3>持续追踪 <span class="note">（达到目标价后自动邮件提醒）</span></h3>
+      <div v-for="t in trackers" :key="t.id" class="tracker-row">
+        <span class="tsym">{{ t.symbol }}</span>
+        <span class="tdir" :class="t.direction === 'up' ? 'up' : 'down'">{{ t.direction === 'up' ? '价≥' : '价≤' }}</span>
+        <span class="tprice">{{ fmtPrice(t.target_price) }}</span>
+        <span class="texp">截止 {{ fmtExpire(t.expire_at) }}</span>
+        <span class="tstatus" :class="trackerStatus(t).cls">{{ trackerStatus(t).text }}</span>
+        <button class="track-del" @click="removeTracker(t.id)">删除</button>
+      </div>
+    </div>
+
+    <div v-if="trackTarget" class="modal-mask" @click.self="trackTarget = null">
+      <div class="modal">
+        <h3>持续追踪 {{ trackTarget.symbol }}</h3>
+        <div class="modal-row">
+          <span class="mode-label">方向：</span>
+          <div class="seg">
+            <button :class="{ active: trackForm.direction === 'up' }" @click="trackForm.direction = 'up'">向上（价 ≥ 目标）</button>
+            <button :class="{ active: trackForm.direction === 'down' }" @click="trackForm.direction = 'down'">向下（价 ≤ 目标）</button>
+          </div>
+        </div>
+        <div class="modal-row">
+          <span class="mode-label">目标价：</span>
+          <input v-model="trackForm.price" type="number" step="any" class="score-input wide" :placeholder="String(trackTarget.price)" />
+          <span class="note">当前价 {{ fmtPrice(trackTarget.price) }}</span>
+        </div>
+        <div class="modal-row">
+          <span class="mode-label">截止时间：</span>
+          <input v-model="trackForm.expire" type="datetime-local" class="month-input" />
+        </div>
+        <div v-if="trackError" class="hint err small">{{ trackError }}</div>
+        <div class="modal-actions">
+          <button class="btn ghost" @click="trackTarget = null">取消</button>
+          <button class="btn" :disabled="trackSaving" @click="saveTracker">{{ trackSaving ? '保存中…' : '保存并追踪' }}</button>
+        </div>
       </div>
     </div>
   </div>
@@ -624,5 +755,161 @@ onBeforeUnmount(stopPoll)
   padding: 8px 12px;
   color: #5e6673;
   font-size: 12px;
+}
+.param-input {
+  background: #1e2329;
+  border: 1px solid #2b3139;
+  border-radius: 6px;
+  color: #eaecef;
+  padding: 3px 6px;
+  font-size: 13px;
+  width: 56px;
+  color-scheme: dark;
+}
+.param-input:focus {
+  border-color: #f0b90b;
+  outline: none;
+}
+.param-input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.track-btn {
+  background: transparent;
+  border: 1px solid #f0b90b;
+  color: #f0b90b;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.track-btn:hover {
+  background: #f0b90b;
+  color: #0b0e11;
+}
+.tracker-list {
+  margin-top: 14px;
+  border: 1px solid #2b3139;
+  border-radius: 8px;
+  background: #101417;
+  padding: 12px 14px;
+}
+.tracker-list h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: #eaecef;
+}
+.tracker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid #1e2329;
+  font-size: 13px;
+}
+.tracker-row:last-child {
+  border-bottom: none;
+}
+.tsym {
+  color: #f0b90b;
+  font-weight: 600;
+  width: 90px;
+}
+.tdir.up {
+  color: #0ecb81;
+}
+.tdir.down {
+  color: #f6465d;
+}
+.tprice {
+  color: #eaecef;
+  font-family: 'SF Mono', Menlo, monospace;
+  min-width: 90px;
+}
+.texp {
+  color: #848e9c;
+  font-size: 12px;
+}
+.tstatus {
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 4px;
+}
+.tstatus.active {
+  background: #1e2329;
+  color: #f0b90b;
+}
+.tstatus.hit {
+  background: #143a2a;
+  color: #0ecb81;
+}
+.tstatus.expired {
+  background: #2b2026;
+  color: #848e9c;
+}
+.track-del {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid #2b3139;
+  color: #848e9c;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.track-del:hover {
+  color: #f6465d;
+  border-color: #f6465d;
+}
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: #161a1e;
+  border: 1px solid #2b3139;
+  border-radius: 10px;
+  padding: 18px 20px;
+  width: 420px;
+  max-width: 92vw;
+  color: #eaecef;
+}
+.modal h3 {
+  margin: 0 0 14px;
+  font-size: 15px;
+}
+.modal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.score-input.wide {
+  width: 140px;
+}
+.hint.small {
+  padding: 6px 0;
+  font-size: 13px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+.btn.ghost {
+  background: transparent;
+  border: 1px solid #2b3139;
+  color: #848e9c;
+}
+.btn.ghost:hover {
+  color: #eaecef;
+  border-color: #eaecef;
 }
 </style>

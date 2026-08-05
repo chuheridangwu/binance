@@ -32,17 +32,30 @@
 
 | 编号 | 规则 | 判定条件 |
 |------|------|----------|
-| R1 | RSI(6) 一周内 ≥ 80 | 近 7 根日K中任意一根 RSI(6) ≥ 80 |
-| R2 | 3日内创新高 + RSI 顶背离 | 近 3 天价格创 60 天新高，且新高处 RSI(6) 低于前高处取值 |
+| R1 | RSI(6) 近N日 ≥ 80 | 近 N 根日K中任意一根 RSI(6) ≥ 80，**N 可调 3-10，默认 7** |
+| R2 | N日内创新高 + RSI 顶背离 | 近 N 天价格创 60 天新高，且新高处 RSI(6) 低于前高处取值，**N 可调 3-10，默认 3** |
 | R3 | 价格 ≥ 布林带上轨 | 收盘价站上布林带 (20, 2) 上轨 |
-| R4 | OI 持续增加 | 未平仓合约量近 5 天净增，且至少 3 天上升（已放宽，见「完成」） |
-| R5 | 单日量 > 近7日总和 | 最近一根日K成交量大于之前 7 天之和 |
+| R4 | 当日 OI > 前N日总和 | 当日未平仓合约量大于之前 N 天 OI 之和，**N 可调 3-7，默认 5** |
+| R5 | 单日量 > 前N日总和 | 最近一根日K成交量大于之前 N 天之和，**N 可调 3-7，默认 3** |
 
 配套要求：面板上可勾选哪些规则命中、可切换 **「任一满足 / 全部满足」** 匹配逻辑；**全量扫描（只扫 USDT 永续，不做自选池限制）**；头部限速防币安封 IP（用户明确首要目标是别被封号）。
 
 ---
 
 ## 2. 我们已经完成了什么（全部已提交并推送）
+
+### 规则参数化 + 持续追踪 + 定时扫描（2026-08 新增）
+- **规则参数化**：`server/screener.js` 的 `RULES` 增加 `param` 元数据（min/max/def），`checkR1/checkR2/checkR4/checkR5` 接受 `days` 参数；`scan(rules, mode, { month, params })` 按范围钳制参数（R1/R2: 3-10 默认 7/3，R4/R5: 3-7 默认 5/3）。**R4 语义变更**：从「近 5 天逐日上升」改为「当日 OI > 前 N 日总和」。前端规则行旁新增 N 天数输入框，`params` 随 `startScreener` 提交。导出 `RULE_DEFAULTS` 供定时扫描用。
+- **持续追踪（价格提醒）**：
+  - `server/db.js` 新增 `trackers` 表（id/symbol/direction/target_price/expire_at/created_at/notified/notified_at；notified 0=追踪中 1=已触发 2=已过期）。
+  - `server/trackers.js` 新建：`listTrackers` / `createTracker`（校验目标价>0、截止时间晚于当前）/ `deleteTracker` / `checkTrackers`（用 `getFuturesPrices()` 批量价格一次校验全部活跃追踪，命中发邮件并标记，过期标记 notified=2）。
+  - `server/binance.js` 新增 `getFuturesPrices()`：`/fapi/ticker/price` 无参一次取全市场，30 秒内存缓存。
+  - `server/index.js` 新增 `GET/POST /api/trackers`、`DELETE /api/trackers/:id`。
+  - 前端：命中行加「追踪」按钮 → 弹窗（方向向上/向下 + 目标价 + 截止时间）；底部「持续追踪」列表可删除；`src/api/monitor.js` 新增 `fetchTrackers/createTracker/deleteTracker`。
+  - `checkTrackers()` 挂在 `monitor.runOnce()` 里（每分钟随监控跑一次）。
+- **定时默认扫描**：`monitor.js` 的 `scanScheduledDefault()` 按**北京时间（UTC+8）**在 `00:01/04:01/12:01/16:01/20:01` 各跑一次「全部规则+默认参数+any」扫描，有命中则发一封汇总邮件；用 settings key `sched_scan_日期_时:分` 防重复，扫描失败清空 key 允许重试。挂在 `runOnce()` 末尾。
+
+功能完整可用，已合入 main 并推送。新增：新币/套利**邮件通知失败自动重试**（见下）。
 
 ### 四类策略筛选器（2026-08 新增）
 - `server/binance.js`：新增 `getFundingRates()`（`/premiumIndex` 无参一次取全市场，5min 内存缓存，Map symbol→lastFundingRate）与 `getLongShortRatio(symbol)`（`topLongShortAccountRatio?period=1d&limit=1`，10min Map 缓存，返回 `{ratio,long,short}` 或 null）。注意 `getFundingRates` 返回 **Map**，取值要用 `.get(sym)` 不是 `[sym]`。**`getLongShortRatio` 当前已无调用方**（多空比条件已从反转策略移除），保留备用。
@@ -148,13 +161,13 @@
 
 ## 4. 下一步计划是什么（按优先级）
 
-1. **由用户实测四类策略扫描**：确认服务器已跑最新代码，在页面上「指标选股」分别切四个策略 Tab 扫描，确认：
-   - 评分/信号标签/指标列渲染正常，点击行跳行情
-   - **资金费率 / 多空比字段与币安实际返回一致**（`getFundingRates` 的 `lastFundingRate`、`topLongShortAccountRatio` 的 `longShortRatio/longAccount/shortAccount`），若不符需调整字段名
-   - 扫描过程不报 429/418、不封 IP、能正常跑完
-2. **若反转策略 OI/费率/多空比全空**：查 `docker logs` 容器日志，重点看 `premiumIndex` / `topLongShortAccountRatio` 是否被区域/限流拦截（本机无法复现，需服务器侧证据）。
-3. **验证规则扫描仍可用**：规则 Tab 是旧功能，确保回归无碍。
-4. **可选增强**（用户曾提过，未实现）：底背离规则；评分制再调权重/阈值。
+1. **由用户实测新功能**：确认服务器已跑最新代码，在页面上验证：
+   - 规则扫描参数输入框（R1/R2: 3-10，R4/R5: 3-7）生效，R4 新语义（当日 OI > 前N日总和）
+   - 「追踪」弹窗创建追踪 → 底部列表出现 → 服务器 `getFuturesPrices()` 命中后收到邮件（可把目标价设为接近现价来快速验证）
+   - 定时扫描：等北京时间 00:01/04:01/12:01/16:01/20:01 触发，有命中应收到汇总邮件
+   - 四类策略扫描回归、资金费率字段与币安实际返回一致
+2. **若追踪/定时扫描邮件收不到**：查 `docker logs`，重点看 `tracker`/`定时选股` 日志与 SMTP 配置（`server/trackers.js` 的 `checkTrackers`、`monitor.js` 的 `scanScheduledDefault`）。
+3. **可选增强**：底背离规则；评分制再调权重/阈值；追踪到期未命中时补发一条「过期」邮件。
 
 ---
 

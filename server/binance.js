@@ -211,7 +211,6 @@ export async function getFundingRates() {
 }
 
 const lsCache = new Map()
-
 // 大户多空比（持仓账户口径），10 分钟内存缓存；数据接口无法批量，只能逐币
 export async function getLongShortRatio(symbol) {
   const c = lsCache.get(symbol)
@@ -273,6 +272,22 @@ export async function getKlines(symbol, interval, limit = 500, beforeSec) {
     if (klines.length) writeKlines(symbol, interval, klines)
     return klines
   }
+}
+
+let pricesCache = null
+let pricesCacheExp = 0
+
+// 全市场永续最新价格：ticker/price 无参一次返回全部，30 秒内存缓存
+export async function getFuturesPrices() {
+  if (pricesCache && pricesCacheExp > Date.now()) return pricesCache
+  const data = await getJson(`${FUTURES}/ticker/price`)
+  const map = new Map()
+  if (Array.isArray(data)) {
+    for (const d of data) map.set(d.symbol, +d.price || 0)
+  }
+  pricesCache = map
+  pricesCacheExp = Date.now() + 30 * 1000
+  return map
 }
 
 export async function searchSymbols(keyword) {

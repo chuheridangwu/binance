@@ -8,12 +8,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RESULTS_FILE = path.join(__dirname, '..', 'data', 'scan-results.json')
 
 export const RULES = [
-  { id: 'r1', name: 'RSI(6) 一周内 ≥ 80', desc: '近 7 根日K中任意一根 RSI(6) ≥ 80' },
-  { id: 'r2', name: '3日内创新高 + RSI 顶背离', desc: '近 3 天价格创 60 天新高，且 RSI(6) 低于前高时的取值' },
+  { id: 'r1', name: 'RSI(6) 近N日 ≥ 80', desc: '近 N 根日K中任意一根 RSI(6) ≥ 80', param: { name: 'N', min: 3, max: 10, def: 7 } },
+  { id: 'r2', name: 'N日内创新高 + RSI 顶背离', desc: '近 N 天价格创 60 天新高，且 RSI(6) 低于前高时的取值', param: { name: 'N', min: 3, max: 10, def: 3 } },
   { id: 'r3', name: '价格 ≥ 布林带上轨', desc: '收盘价站上布林带 (20, 2) 上轨' },
-  { id: 'r4', name: 'OI 持续增加', desc: '永续未平仓合约量近 5 天逐日上升' },
-  { id: 'r5', name: '单日量 > 近7日总和', desc: '最近一根日K成交量大于之前 7 天成交量之和' },
+  { id: 'r4', name: '当日 OI > 前N日总和', desc: '当日未平仓合约量大于之前 N 天 OI 之和', param: { name: 'N', min: 3, max: 7, def: 5 } },
+  { id: 'r5', name: '单日量 > 前N日总和', desc: '最近一根日K成交量大于之前 N 天成交量之和', param: { name: 'N', min: 3, max: 7, def: 3 } },
 ]
+
+export const RULE_DEFAULTS = {
+  r1: RULES.find((r) => r.id === 'r1').param.def,
+  r2: RULES.find((r) => r.id === 'r2').param.def,
+  r4: RULES.find((r) => r.id === 'r4').param.def,
+  r5: RULES.find((r) => r.id === 'r5').param.def,
+}
 
 const state = { running: false, total: 0, done: 0, found: 0, errors: 0, startAt: 0, lastScanAt: 0 }
 let lastResults = null
@@ -102,9 +109,9 @@ function bollinger(closes, period = 20, mult = 2) {
   }
 }
 
-export function checkR1(rsi6) {
+export function checkR1(rsi6, days = 7) {
   const n = rsi6.length
-  const start = Math.max(0, n - 7)
+  const start = Math.max(0, n - days)
   let weekMax = -1
   for (let i = start; i < n; i++) {
     if (Number.isFinite(rsi6[i]) && rsi6[i] > weekMax) weekMax = rsi6[i]
@@ -114,25 +121,26 @@ export function checkR1(rsi6) {
     hit: weekMax >= 80,
     weekMaxRsi: weekMax >= 0 ? weekMax : cur,
     curRsi: Number.isFinite(cur) ? cur : null,
+    days,
   }
 }
 
-export function checkR2(klines, rsi6) {
+export function checkR2(klines, rsi6, days = 3) {
   const n = klines.length
   if (n < 63) return { hit: false }
-  let curIdx = n - 3
-  for (let i = n - 3; i < n; i++) if (klines[i].high > klines[curIdx].high) curIdx = i
+  let curIdx = n - days
+  for (let i = n - days; i < n; i++) if (klines[i].high > klines[curIdx].high) curIdx = i
   const curHigh = klines[curIdx].high
-  const from = Math.max(0, n - 3 - 60)
+  const from = Math.max(0, n - days - 60)
   let prevIdx = from
-  for (let i = from; i < n - 3; i++) if (klines[i].high > klines[prevIdx].high) prevIdx = i
+  for (let i = from; i < n - days; i++) if (klines[i].high > klines[prevIdx].high) prevIdx = i
   const prevHigh = klines[prevIdx].high
   const curRsi = rsi6[curIdx]
   const prevRsi = rsi6[prevIdx]
   if (!(curHigh > prevHigh) || !Number.isFinite(curRsi) || !Number.isFinite(prevRsi)) {
-    return { hit: false, curHigh, prevHigh, curRsi, prevRsi }
+    return { hit: false, curHigh, prevHigh, curRsi, prevRsi, days }
   }
-  return { hit: curRsi < prevRsi, curHigh, prevHigh, curRsi, prevRsi }
+  return { hit: curRsi < prevRsi, curHigh, prevHigh, curRsi, prevRsi, days }
 }
 
 export function checkR3(closes) {
@@ -143,22 +151,19 @@ export function checkR3(closes) {
   return { hit: Number.isFinite(u) && price >= u, price, upper: u }
 }
 
-export function checkR4(oiList) {
-  if (!oiList || oiList.length < 5) return { hit: false, oiList: oiList || [], upCount: 0, netUp: false }
-  const last5 = oiList.slice(-5)
-  const ups = []
-  for (let i = 1; i < last5.length; i++) ups.push(last5[i] > last5[i - 1])
-  const upCount = ups.filter(Boolean).length
-  const netUp = last5[last5.length - 1] > last5[0]
-  return { hit: netUp && upCount >= 3, oiList: last5, upCount, netUp }
+export function checkR4(oiList, days = 5) {
+  if (!oiList || oiList.length < days + 1) return { hit: false, oiList: oiList || [], today: null, prevSum: null }
+  const today = oiList[oiList.length - 1]
+  const prevSum = oiList.slice(-days - 1, -1).reduce((a, b) => a + b, 0)
+  return { hit: prevSum > 0 && today > prevSum, oiList: oiList.slice(-(days + 1)), today, prevSum, days }
 }
 
-export function checkR5(klines) {
+export function checkR5(klines, days = 3) {
   const n = klines.length
-  if (n < 8) return { hit: false }
+  if (n < days + 1) return { hit: false }
   const last = klines[n - 1].volume
-  const prevSum = klines.slice(n - 8, n - 1).reduce((a, k) => a + k.volume, 0)
-  return { hit: prevSum > 0 && last > prevSum, volume: last, prevSum, ratio: prevSum > 0 ? last / prevSum : 0 }
+  const prevSum = klines.slice(n - days - 1, n - 1).reduce((a, k) => a + k.volume, 0)
+  return { hit: prevSum > 0 && last > prevSum, volume: last, prevSum, ratio: prevSum > 0 ? last / prevSum : 0, days }
 }
 
 /* ================= 四类策略 ================= */
@@ -482,6 +487,13 @@ export async function scan(rules, mode = 'any', opts = {}) {
     .map(([k]) => k)
   if (!enabled.length) throw new Error('至少勾选一个规则')
 
+  const params = {}
+  for (const rid of ['r1', 'r2', 'r4', 'r5']) {
+    const meta = RULES.find((r) => r.id === rid)?.param
+    const raw = Number(opts.params?.[rid])
+    params[rid] = Number.isFinite(raw) ? Math.min(meta.max, Math.max(meta.min, Math.round(raw))) : meta.def
+  }
+
   state.running = true
   state.total = 0
   state.done = 0
@@ -514,14 +526,14 @@ export async function scan(rules, mode = 'any', opts = {}) {
         const hit = []
 
         if (rules.r1) {
-          const r = checkR1(rsi6)
+          const r = checkR1(rsi6, params.r1)
           if (r.hit) {
             hit.push('r1')
             detail.r1 = r
           }
         }
         if (rules.r2) {
-          const r = checkR2(kl, rsi6)
+          const r = checkR2(kl, rsi6, params.r2)
           if (r.hit) {
             hit.push('r2')
             detail.r2 = r
@@ -535,13 +547,13 @@ export async function scan(rules, mode = 'any', opts = {}) {
           }
         }
         if (rules.r4) {
-          const oi = await getOpenInterestHistory(sym, '1d', 5)
-          const r = checkR4(oi.map((o) => o.oi))
+          const oi = await getOpenInterestHistory(sym, '1d', params.r4 + 1)
+          const r = checkR4(oi.map((o) => o.oi), params.r4)
           detail.r4 = r
           if (r.hit) hit.push('r4')
         }
         if (rules.r5) {
-          const r = checkR5(kl)
+          const r = checkR5(kl, params.r5)
           if (r.hit) {
             hit.push('r5')
             detail.r5 = r
@@ -559,7 +571,7 @@ export async function scan(rules, mode = 'any', opts = {}) {
     })
 
     results.sort((a, b) => b.matched.length - a.matched.length)
-    lastResults = { mode, rules: enabled, month: (opts.month || '').trim(), results, generatedAt: Date.now() }
+    lastResults = { mode, rules: enabled, params, month: (opts.month || '').trim(), results, generatedAt: Date.now() }
     persistResults()
     return lastResults
   } finally {

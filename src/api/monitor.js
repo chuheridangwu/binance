@@ -57,12 +57,28 @@ export function fetchSpread(symbols) {
   return api(`/api/spread?symbols=${encodeURIComponent(q)}`)
 }
 
-export function startScreener(rules, mode, month) {
+export function startScreener(rules, mode, month, params) {
   return api('/api/screener', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...rules, mode, month: month || '' }),
+    body: JSON.stringify({ ...rules, mode, month: month || '', params: params || {} }),
   })
+}
+
+export function fetchTrackers() {
+  return api('/api/trackers')
+}
+
+export function createTracker(payload) {
+  return api('/api/trackers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteTracker(id) {
+  return api(`/api/trackers/${id}`, { method: 'DELETE' })
 }
 
 export function screenerStatus() {

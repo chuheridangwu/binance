@@ -38,7 +38,7 @@ async function acquire() {
   }
 }
 
-async function getJson(url, timeoutMs = 15000) {
+export async function getJson(url, timeoutMs = 15000) {
   const retries = 2
   for (let attempt = 0; ; attempt++) {
     const release = await acquire()
@@ -276,6 +276,8 @@ export async function fetchListingAnnouncements(maxPages = 40, known = new Set()
       if (known.size && articles.every((a) => known.has(a.code))) break
       consecutiveFailures = 0
       page++
+      // 翻页之间主动让一步，公告目录是公开内容接口，别把单次补全做得像爬虫
+      await sleep(250)
     } catch {
       consecutiveFailures++
       if (consecutiveFailures >= 5) break

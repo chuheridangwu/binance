@@ -85,7 +85,8 @@ async function upsertListing({ code, symbol, title, date, market, source }) {
 async function scanAnnouncements() {
   try {
     const known = new Set(db.prepare('SELECT code FROM listings').all().map((r) => r.code))
-    const { list } = await fetchListingAnnouncements(100, known)
+    // 增量扫描只翻前几页即可：补全完成后整页已入库会提前停止，正常情况下只拉 1~2 页
+    const { list } = await fetchListingAnnouncements(5, known)
     for (const a of list) {
       await upsertListing({ code: a.code, symbol: a.symbol, title: a.title, date: a.date, market: 'announce', source: 'announcement' })
       if (isSameDay(a.date, Date.now())) await notify({ code: a.code, symbol: a.symbol, title: a.title, date: a.date })
@@ -181,8 +182,8 @@ export async function runOnce() {
 export function startMonitor(intervalMs = 60_000) {
   const iv = Math.max(intervalMs, 10_000)
   setInterval(runOnce, iv)
-  runOnce()
-  bootstrapAnnouncements().catch(() => {})
+  // 等首轮 runOnce 跑完再启动全量补全，避免启动瞬间两个公告抓取并发
+  runOnce().then(() => bootstrapAnnouncements().catch(() => {}))
   return () => clearInterval(iv)
 }
 

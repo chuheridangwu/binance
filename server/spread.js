@@ -1,22 +1,11 @@
 const SPOT = 'https://api.binance.com/api/v3'
 const FUTURES = 'https://fapi.binance.com/fapi/v1'
+import { getJson } from './binance.js'
 
 export const DEFAULT_WATCH = [
   'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT',
   'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'LTCUSDT', 'DOTUSDT', 'TRXUSDT',
 ]
-
-async function getJson(url, timeoutMs = 15000) {
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
-  try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0' } })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    return await res.json()
-  } finally {
-    clearTimeout(timer)
-  }
-}
 
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length)

@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS symbols (
   market     TEXT NOT NULL,
   active     INTEGER NOT NULL DEFAULT 0,
   type       TEXT DEFAULT '',
+  underlying TEXT DEFAULT '',
   fetched_at INTEGER NOT NULL,
   PRIMARY KEY (symbol, market)
 );
@@ -65,6 +66,10 @@ if (!listingCols.has('retry_count')) {
 }
 if (!listingCols.has('last_notify_attempt')) {
   db.exec('ALTER TABLE listings ADD COLUMN last_notify_attempt INTEGER')
+}
+const symbolCols = new Set(db.prepare('PRAGMA table_info(symbols)').all().map((c) => c.name))
+if (!symbolCols.has('underlying')) {
+  db.exec('ALTER TABLE symbols ADD COLUMN underlying TEXT DEFAULT ""')
 }
 
 export function getSetting(key) {

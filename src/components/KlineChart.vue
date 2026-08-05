@@ -426,7 +426,10 @@ watch(
             :class="{ delisted: !s.active }"
             @mousedown.prevent="pick(s)"
           >
-            {{ s.symbol }}<span v-if="!s.active" class="badge">已下架</span>
+            {{ s.symbol }}
+            <span v-if="s.kind === 'stock'" class="badge stock">股票</span>
+            <span v-else-if="s.kind === 'commodity'" class="badge commodity">商品</span>
+            <span v-if="!s.active" class="badge delisted">已下架</span>
           </li>
         </ul>
       </div>
@@ -555,6 +558,15 @@ watch(
   border-radius: 4px;
   padding: 1px 6px;
 }
+.dropdown li .badge {
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  border: 1px solid #2b3139;
+}
+.dropdown li .badge.stock { color: #8ab4ff; background: #223458; border-color: #223458; }
+.dropdown li .badge.commodity { color: #43e3b4; background: #12352c; border-color: #12352c; }
+.dropdown li .badge.delisted { color: #ff7d8c; background: #3a1d24; border-color: #3a1d24; }
 .dropdown li:hover {
   background: #2b3139;
 }

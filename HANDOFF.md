@@ -74,9 +74,10 @@
 
 ### 月度上新：股票/商品代币与已下架区分
 - `/api/listings` 每项附加 `kind`（`stock`/`commodity`/`crypto`）与 `delisted`（`true`/`false`/`null`=symbols 表为空时未知）：
-  - `classifyKind` 靠**公告标题**判断：`Tokenized Stock`/`股票代币`/`股票` → stock；`Tokenized Commodity`/`商品代币`/`原油`/`黄金` → commodity。股票/商品代币 2021 年上线、BUSD 计价、同年全部下架，已不在 USDT `symbols` 表，故天然标为已下架。
-  - `isDelisted`：用 `symbols` 表 active 集合判定，兼容 base 符号（ARB→查 ARBUSDT）与完整对（BTCUSDT→直接查）。
-- 前端 `ListingsStats.vue`：tag 加 `股票`/`商品`/`已下架` 徽标，标题行加图例。数据来自本地 DB，不新增对外请求。
+  - `classifyKind`（`server/binance.js`，供 `/api/listings` 与 `/api/search` 共用）优先级：**公告标题关键词**（`Tokenized Stock`/`股票代币`/`股票` → stock；`Tokenized Commodity`/`商品代币`/`原油`/`黄金` → commodity）→ **symbols 表 `underlying` 字段**（futures exchangeInfo 的 `underlyingType`，`STOCK`→stock、`COMMODITY`→commodity）→ **已知符号集合兜底**（`STOCK_SYMBOLS`/`COMMODITY_SYMBOLS`，覆盖已下架不在 exchangeInfo 的代币与 2026 股票永续）。
+  - `symbols` 表新增 `underlying` 列（含 ALTER 迁移）：拉 exchangeInfo 时存 `s.underlyingType`（futures 才有，spot 为 ''）。**这是 2026 股票永续（AAPLUSDT/QQQUSDT/SPYUSDT/TSMUSDT/XAGUSDT 等）识别的关键**——它们由行情反推插入、标题是通用的「Binance Futures 新上合约：XXX」，靠标题识别不到。
+  - `isDelisted`：用 `symbols` 表 active 集合判定，兼容 base 符号（ARB→查 ARBUSDT）与完整对（BTCUSDT→直接查）。AAPLUSDT 是活跃永续 → 不会误标已下架。
+- 前端：`ListingsStats.vue` tag 加 `股票`/`商品`/`已下架` 徽标 + 图例；`KlineChart.vue` 搜索下拉同样显示这三类徽标。数据来自本地 DB，不新增对外请求。
 
 ### 限流/防制裁与持久化原则
 - **本应用是统计工具，不做爬虫**：所有对外请求都必须走 `binance.js` 的全局限速器（`getJson`：并发≤4、相邻请求≥180ms、429/418 按 retry-after 退避，最多重试 2 次）。**spread.js 已改用共享的 `getJson`**（原先自带裸 fetch、8 并发、无退避，是最薄弱路径）。

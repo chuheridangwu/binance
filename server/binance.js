@@ -79,10 +79,10 @@ let exchangeExp = { spot: 0, futures: 0 }
 async function fetchAndStoreSymbols() {
   const now = Date.now()
   const stmt = db.prepare(
-    `INSERT INTO symbols (symbol, market, active, type, fetched_at)
-     VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO symbols (symbol, market, active, type, underlying, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(symbol, market) DO UPDATE SET
-       active = excluded.active, type = excluded.type, fetched_at = excluded.fetched_at`
+       active = excluded.active, type = excluded.type, underlying = excluded.underlying, fetched_at = excluded.fetched_at`
   )
   db.exec('BEGIN')
   try {
@@ -92,7 +92,8 @@ async function fetchAndStoreSymbols() {
         const data = await getJson(`${base}/exchangeInfo`)
         for (const s of data.symbols) {
           if (s.quoteAsset !== 'USDT') continue
-          stmt.run(s.symbol, market, s.status === 'TRADING' ? 1 : 0, s.contractType || '', now)
+          // futures 才有 underlyingType（STOCK/COMMODITY 等代表股票/商品永续，如 AAPLUSDT、XAGUSDT）
+          stmt.run(s.symbol, market, s.status === 'TRADING' ? 1 : 0, s.contractType || '', s.underlyingType || '', now)
         }
       } catch {
         /* 单个市场拉取失败不致命，保留旧数据 */
@@ -239,12 +240,50 @@ export async function getKlines(symbol, interval, limit = 500, beforeSec) {
 export async function searchSymbols(keyword) {
   const kw = (keyword || '').toUpperCase()
   const all = await getAllSymbols()
-  const matches = all.filter((s) => s.symbol.includes(kw))
+  const underlying = buildUnderlyingMap()
+  const matches = all
+    .filter((s) => s.symbol.includes(kw))
+    .map((m) => ({ ...m, kind: classifyKind(m.symbol, '', underlying.get(m.symbol.toUpperCase())) }))
   matches.sort((a, b) => {
     if (a.active !== b.active) return a.active ? -1 : 1
     return a.symbol.localeCompare(b.symbol)
   })
   return matches.slice(0, 30)
+}
+
+// 股票/商品代币与「股票/商品永续合约」（如 AAPLUSDT、XAGUSDT）识别
+const STOCK_RE = /tokenized stock|stock token|股票代币|股票/i
+const COMMODITY_RE = /tokenized commodity|commodity token|商品代币|原油|黄金|大宗商品/i
+
+// 兜底集合：underlyingType 未命中或已下架不在 exchangeInfo 的已知股票/商品代币
+const STOCK_SYMBOLS = new Set([
+  'AAPL', 'TSLA', 'COIN', 'MSTR', 'MSFT', 'BABA', 'SQ', 'AMZN', 'GOOG', 'NIO',
+  'GME', 'AMC', 'PFE', 'BAC', 'BILI', 'QQQ', 'SPY', 'TSM', 'AB', 'ARLP', 'GLP', 'ET',
+])
+const COMMODITY_SYMBOLS = new Set(['OIL', 'BRENT', 'GOLD', 'XAG', 'XAU', 'SLV', 'GLD', 'USO', 'COPPER'])
+
+export function classifyKind(symbol, title, underlying = '') {
+  const t = String(title || '')
+  if (STOCK_RE.test(t)) return 'stock'
+  if (COMMODITY_RE.test(t)) return 'commodity'
+  const u = String(underlying || '').toUpperCase()
+  if (u === 'STOCK') return 'stock'
+  if (u === 'COMMODITY') return 'commodity'
+  const base = String(symbol || '').toUpperCase().replace(/USDT$/, '')
+  if (STOCK_SYMBOLS.has(base)) return 'stock'
+  if (COMMODITY_SYMBOLS.has(base)) return 'commodity'
+  return 'crypto'
+}
+
+export function buildUnderlyingMap() {
+  const map = new Map()
+  const rows = db.prepare("SELECT symbol, underlying FROM symbols WHERE underlying != ''").all()
+  for (const r of rows) {
+    map.set(r.symbol.toUpperCase(), r.underlying)
+    const base = r.symbol.replace(/USDT$/, '')
+    if (!map.has(base)) map.set(base, r.underlying)
+  }
+  return map
 }
 
 function parseListedSymbol(title) {

@@ -256,9 +256,11 @@ const STOCK_RE = /tokenized stock|stock token|股票代币|股票/i
 const COMMODITY_RE = /tokenized commodity|commodity token|商品代币|原油|黄金|大宗商品/i
 
 // 兜底集合：underlyingType 未命中或已下架不在 exchangeInfo 的已知股票/商品代币
+// 也覆盖 2026 股票永续（AAPLUSDT/QQQUSDT/GIGADEVUSDT 等，标题不含"股票"关键词）
 const STOCK_SYMBOLS = new Set([
   'AAPL', 'TSLA', 'COIN', 'MSTR', 'MSFT', 'BABA', 'SQ', 'AMZN', 'GOOG', 'NIO',
-  'GME', 'AMC', 'PFE', 'BAC', 'BILI', 'QQQ', 'SPY', 'TSM', 'AB', 'ARLP', 'GLP', 'ET',
+  'GME', 'AMC', 'PFE', 'BAC', 'BILI', 'QQQ', 'SPY', 'TSM', 'GIGADEV',
+  'AB', 'ARLP', 'GLP', 'ET',
 ])
 const COMMODITY_SYMBOLS = new Set(['OIL', 'BRENT', 'GOLD', 'XAG', 'XAU', 'SLV', 'GLD', 'USO', 'COPPER'])
 
@@ -266,12 +268,15 @@ export function classifyKind(symbol, title, underlying = '') {
   const t = String(title || '')
   if (STOCK_RE.test(t)) return 'stock'
   if (COMMODITY_RE.test(t)) return 'commodity'
-  const u = String(underlying || '').toUpperCase()
-  if (u === 'STOCK') return 'stock'
-  if (u === 'COMMODITY') return 'commodity'
   const base = String(symbol || '').toUpperCase().replace(/USDT$/, '')
   if (STOCK_SYMBOLS.has(base)) return 'stock'
   if (COMMODITY_SYMBOLS.has(base)) return 'commodity'
+  const u = String(underlying || '').toUpperCase()
+  // Binance 官方枚举为 COIN | INDEX（另有新增的 STOCK/COMMODITY 等）；
+  // 股票永续的 underlyingType 常为 INDEX（公告原文用 "Underlying Index/Equity"）。
+  // 已知集合先查避免 INDEX 歧义把商品误判成股票。
+  if (u === 'STOCK' || u === 'INDEX') return 'stock'
+  if (u === 'COMMODITY') return 'commodity'
   return 'crypto'
 }
 

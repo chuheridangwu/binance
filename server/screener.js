@@ -54,6 +54,34 @@ export function getLastResults() {
   return lastResults
 }
 
+// 不追踪标记：一周内有效
+export const MUTE_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
+export function getMuteMap() {
+  const cutoff = Date.now() - MUTE_TTL_MS
+  const rows = db.prepare('SELECT symbol, created_at FROM muted_symbols WHERE created_at >= ?').all(cutoff)
+  const m = new Map()
+  for (const r of rows) m.set(r.symbol, r.created_at)
+  return m
+}
+
+export function listMutes() {
+  return [...getMuteMap().entries()].map(([symbol, created_at]) => ({ symbol, created_at }))
+}
+
+export function addMute(symbol) {
+  const s = String(symbol || '').trim().toUpperCase()
+  if (!s) throw new Error('symbol 必填')
+  db.prepare(
+    'INSERT INTO muted_symbols (symbol, created_at) VALUES (?, ?) ON CONFLICT(symbol) DO UPDATE SET created_at = excluded.created_at'
+  ).run(s, Date.now())
+  return { symbol: s }
+}
+
+export function removeMute(symbol) {
+  db.prepare('DELETE FROM muted_symbols WHERE symbol = ?').run(String(symbol || '').trim().toUpperCase())
+}
+
 export function rsiSeries(closes, period) {
   const out = new Array(closes.length).fill(NaN)
   let avgGain = 0
@@ -578,7 +606,13 @@ export async function scan(rules, mode = 'any', opts = {}) {
       state.done++
     })
 
+    const muted = getMuteMap()
+    results.forEach((r) => {
+      r.muted = muted.has(r.symbol)
+      r.mutedAt = muted.get(r.symbol) ?? null
+    })
     results.sort((a, b) => {
+      if (!!a.muted !== !!b.muted) return a.muted ? 1 : -1
       if (b.matched.length !== a.matched.length) return b.matched.length - a.matched.length
       return (b.rsi6 ?? -1) - (a.rsi6 ?? -1)
     })

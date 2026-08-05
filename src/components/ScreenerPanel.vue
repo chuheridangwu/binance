@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
-import { startScreener, startScreenerStrategies, screenerStatus, fetchScreenerResults, fetchTrackers, createTracker, deleteTracker } from '../api/monitor'
+import { startScreener, startScreenerStrategies, screenerStatus, fetchScreenerResults, fetchTrackers, createTracker, deleteTracker, fetchMutes, addMute, removeMute } from '../api/monitor'
 import { store } from '../store'
 
 const RULES = [
@@ -30,6 +30,7 @@ const rows = ref([])
 const meta = ref(null)
 const state = ref(null)
 const trackers = ref([])
+const mutes = ref([])
 const trackTarget = ref(null)
 const trackForm = ref({ direction: 'up', price: '', expire: '' })
 const trackSaving = ref(false)
@@ -164,7 +165,44 @@ function metricVal(r, key) {
 }
 
 function applyRows(list) {
-  rows.value = (list || []).map((row) => ({ ...row, cells: buildCells(row) }))
+  rows.value = (list || []).map((row) => ({ ...row, cells: buildCells(row), muted: !!muteSet.value.has(row.symbol) }))
+  sortRows()
+}
+
+const muteSet = computed(() => new Set(mutes.value.map((m) => m.symbol)))
+
+function sortRows() {
+  rows.value.sort((a, b) => {
+    if (!!a.muted !== !!b.muted) return a.muted ? 1 : -1
+    const ac = (a.matched || []).length
+    const bc = (b.matched || []).length
+    if (bc !== ac) return bc - ac
+    return (b.rsi6 ?? -1) - (a.rsi6 ?? -1)
+  })
+}
+
+async function toggleMute(row) {
+  if (row.muted) {
+    try {
+      await removeMute(row.symbol)
+      mutes.value = mutes.value.filter((m) => m.symbol !== row.symbol)
+    } catch {}
+  } else {
+    try {
+      await addMute(row.symbol)
+      mutes.value.push({ symbol: row.symbol, created_at: Date.now() })
+    } catch (e) {
+      error.value = e.message
+      return
+    }
+  }
+  row.muted = !row.muted
+  sortRows()
+}
+
+function muteStatus(sym) {
+  const m = mutes.value.find((x) => x.symbol === sym)
+  return m ? { muted: true, until: m.created_at + 7 * 24 * 60 * 60 * 1000 } : { muted: false }
 }
 
 async function run() {
@@ -262,8 +300,17 @@ function fmtExpire(ts) {
   return new Date(ts).toLocaleString('zh-CN', { hour12: false })
 }
 
+async function loadMutes() {
+  try {
+    const res = await fetchMutes()
+    mutes.value = res.mutes || []
+    applyRows(rows.value)
+  } catch {}
+}
+
 onMounted(async () => {
   loadTrackers()
+  await loadMutes()
   try {
     const res = await fetchScreenerResults()
     if (res.results && res.results.length) {
@@ -382,7 +429,7 @@ onBeforeUnmount(stopPoll)
           </tr>
         </thead>
         <tbody>
-          <tr v-if="view === 'rules'" v-for="r in rows" :key="r.symbol" @click="openChart(r.symbol)">
+          <tr v-if="view === 'rules'" v-for="r in rows" :key="r.symbol" :class="{ 'row-muted': r.muted }" @click="openChart(r.symbol)">
             <td class="sym">
               {{ r.symbol }}
               <span class="price-sub">价 {{ fmtPrice(r.price) }} · RSI6 {{ r.rsi6 !== null && r.rsi6 !== undefined ? r.rsi6.toFixed(1) : '—' }}</span>
@@ -395,7 +442,11 @@ onBeforeUnmount(stopPoll)
               <template v-else>—</template>
             </td>
             <td class="track-cell" @click.stop>
-              <button class="track-btn" @click="openTrack(r)">追踪</button>
+              <button v-if="r.muted" class="mute-badge" :title="'不追踪标记，一周内（至 ' + fmtExpire(muteStatus(r.symbol).until) + '）有效，点击取消'" @click="toggleMute(r)">🚫 不追踪</button>
+              <template v-else>
+                <button class="track-btn" @click="openTrack(r)">追踪</button>
+                <button class="mute-btn" @click="toggleMute(r)">不追踪</button>
+              </template>
             </td>
           </tr>
           <tr v-for="r in rows" v-else :key="r.symbol" @click="openChart(r.symbol)">
@@ -412,7 +463,7 @@ onBeforeUnmount(stopPoll)
         </tbody>
       </table>
       <div class="tips">
-        <template v-if="view === 'rules'">点击行跳转行情图表。绿色列=命中规则；OI 列显示当日 OI > 前 N 日总和；「—」表示该规则未勾选或无数据。每条规则旁的 N 输入框可调整天数（R1/R2: 3-10，R4/R5: 3-7），列表标题随所选天数实时变化。「追踪」可对命中合约设置目标价+截止时间，达到后自动邮件提醒。排序规则：命中规则多的靠前，命中数相同的按 RSI6 从高到低。「RSI6」为当前最新 RSI(6) 值。已内置币安限流保护：低并发+请求间隔+429/418 自动退避；K线/OI 缓存 1 小时并落盘（重启不丢），重复扫描直接复用、几乎零 API 消耗。</template>
+        <template v-if="view === 'rules'">点击行跳转行情图表。绿色列=命中规则；OI 列显示当日 OI > 前 N 日总和；「—」表示该规则未勾选或无数据。每条规则旁的 N 输入框可调整天数（R1/R2: 3-10，R4/R5: 3-7），列表标题随所选天数实时变化。「追踪」可对命中合约设置目标价+截止时间，达到后自动邮件提醒。「不追踪」给币打上标记：标记一周内有效，再次扫描时该币显示 🚫 并排在列表最下方（自动扫描邮件同样排最下），点击 🚫 可取消。排序规则：命中规则多的靠前，命中数相同的按 RSI6 从高到低。「RSI6」为当前最新 RSI(6) 值。已内置币安限流保护：低并发+请求间隔+429/418 自动退避；K线/OI 缓存 1 小时并落盘（重启不丢），重复扫描直接复用、几乎零 API 消耗。</template>
         <template v-else>点击行跳转行情图表。评分为 0-100 权重制，仅保留达到最低评分的合约，按评分降序排列。信号标签说明命中的子条件。布林列：「贴近上/下轨」指现价处于布林带区间顶/底 10% 内，「破上/下轨(近7日)」指近一周内收盘价越出过上/下轨。反转策略的资金费率来自币安批量接口（缺失显示 —），若线上字段结构与预期不符请告知。</template>
       </div>
     </div>
@@ -791,6 +842,36 @@ onBeforeUnmount(stopPoll)
 .track-btn:hover {
   background: #f0b90b;
   color: #0b0e11;
+}
+.mute-btn {
+  background: transparent;
+  border: 1px solid #2b3139;
+  color: #848e9c;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: 4px;
+}
+.mute-btn:hover {
+  color: #f6465d;
+  border-color: #f6465d;
+}
+.mute-badge {
+  background: transparent;
+  border: 1px solid #5e6673;
+  color: #848e9c;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mute-badge:hover {
+  color: #f6465d;
+  border-color: #f6465d;
+}
+.row-muted td {
+  opacity: 0.55;
 }
 .tracker-list {
   margin-top: 14px;

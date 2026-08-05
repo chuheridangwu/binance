@@ -64,6 +64,10 @@ CREATE TABLE IF NOT EXISTS trackers (
   notified     INTEGER DEFAULT 0,
   notified_at  INTEGER
 );
+CREATE TABLE IF NOT EXISTS muted_symbols (
+  symbol     TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_listings_date ON listings(date);
 CREATE INDEX IF NOT EXISTS idx_kline_cache_lookup ON kline_cache(symbol, interval, fetched_at);
 CREATE INDEX IF NOT EXISTS idx_oi_cache_lookup ON oi_cache(symbol, fetched_at);

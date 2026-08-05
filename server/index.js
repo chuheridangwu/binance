@@ -136,6 +136,24 @@ app.delete('/api/trackers/:id', (req, res) => {
   res.json({ ok: true })
 })
 
+app.get('/api/mute', (_req, res) => {
+  res.json({ mutes: screener.listMutes() })
+})
+
+app.post('/api/mute', (req, res) => {
+  try {
+    const m = screener.addMute(req.body.symbol)
+    res.json({ ok: true, ...m })
+  } catch (e) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
+app.delete('/api/mute/:symbol', (req, res) => {
+  screener.removeMute(req.params.symbol)
+  res.json({ ok: true })
+})
+
 app.post('/api/screener/strategies', async (req, res) => {
   try {
     const strategies = Array.isArray(req.body.strategies) ? req.body.strategies : ['up']

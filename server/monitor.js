@@ -52,7 +52,7 @@ async function scanScheduledDefault() {
   }
   if (!result.results.length) return
   const rows = result.results
-    .map((r) => `<tr><td>${r.symbol}</td><td>${r.listed || '—'}</td><td>${r.price}</td><td>${(r.matched || []).join(', ')}</td></tr>`)
+    .map((r) => `<tr><td>${r.symbol}${r.muted ? ' 🚫' : ''}</td><td>${r.listed || '—'}</td><td>${r.price}</td><td>${(r.matched || []).join(', ')}</td></tr>`)
     .join('')
   try {
     await sendMail(
@@ -60,6 +60,7 @@ async function scanScheduledDefault() {
       `<p>定时默认规则扫描（北京时间 ${hhmm}）命中 ${rows.length} 个合约：</p>` +
         `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse">` +
         `<tr><th>币种</th><th>上架</th><th>现价</th><th>命中规则</th></tr>${rows}</table>` +
+        `<p>🚫 = 标记为「不追踪」的合约（排在最下方）。排序：命中规则数多的靠前，相同的按 RSI6 从高到低。</p>` +
         `<p>扫描时间：${new Date().toLocaleString('zh-CN')}</p>`
     )
     state.lastEmailAt = Date.now()

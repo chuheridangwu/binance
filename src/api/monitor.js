@@ -81,6 +81,22 @@ export function deleteTracker(id) {
   return api(`/api/trackers/${id}`, { method: 'DELETE' })
 }
 
+export function fetchMutes() {
+  return api('/api/mute')
+}
+
+export function addMute(symbol) {
+  return api('/api/mute', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbol }),
+  })
+}
+
+export function removeMute(symbol) {
+  return api(`/api/mute/${encodeURIComponent(symbol)}`, { method: 'DELETE' })
+}
+
 export function screenerStatus() {
   return api('/api/screener/status')
 }

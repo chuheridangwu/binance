@@ -72,3 +72,11 @@ export function screenerStatus() {
 export function fetchScreenerResults() {
   return api('/api/screener')
 }
+
+export function startScreenerStrategies(strategies, month, minScore) {
+  return api('/api/screener/strategies', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ strategies, month: month || '', minScore }),
+  })
+}

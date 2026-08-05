@@ -86,7 +86,7 @@ app.get('/api/spread', async (req, res) => {
 })
 
 app.get('/api/screener', (_req, res) => {
-  res.json(screener.getLastResults() || { results: [], mode: 'any', rules: [], generatedAt: 0 })
+  res.json({ ...(screener.getLastResults() || { results: [], mode: 'any', rules: [], generatedAt: 0 }), strategies: screener.STRATEGIES })
 })
 
 app.get('/api/screener/status', (_req, res) => {
@@ -105,6 +105,18 @@ app.post('/api/screener', async (req, res) => {
     const mode = req.body.mode === 'all' ? 'all' : 'any'
     const month = typeof req.body.month === 'string' ? req.body.month : ''
     const result = await screener.scan(rules, mode, { month })
+    res.json({ ok: true, ...result, state: screener.getScanState() })
+  } catch (e) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
+app.post('/api/screener/strategies', async (req, res) => {
+  try {
+    const strategies = Array.isArray(req.body.strategies) ? req.body.strategies : ['up']
+    const month = typeof req.body.month === 'string' ? req.body.month : ''
+    const minScore = Number(req.body.minScore) || 60
+    const result = await screener.scanStrategies(strategies, { month, minScore })
     res.json({ ok: true, ...result, state: screener.getScanState() })
   } catch (e) {
     res.status(400).json({ error: e.message })

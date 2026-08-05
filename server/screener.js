@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { db } from './db.js'
-import { getPerpetualSymbols, getFuturesKlines, getOpenInterestHistory } from './binance.js'
+import { getPerpetualSymbols, getFuturesKlines, getOpenInterestHistory, getFundingRates, getLongShortRatio } from './binance.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RESULTS_FILE = path.join(__dirname, '..', 'data', 'scan-results.json')
@@ -155,6 +155,287 @@ export function checkR5(klines) {
   const last = klines[n - 1].volume
   const prevSum = klines.slice(n - 8, n - 1).reduce((a, k) => a + k.volume, 0)
   return { hit: prevSum > 0 && last > prevSum, volume: last, prevSum, ratio: prevSum > 0 ? last / prevSum : 0 }
+}
+
+/* ================= 四类策略 ================= */
+
+export const STRATEGIES = [
+  {
+    id: 'up',
+    name: '上涨趋势',
+    desc: '多头排列 + 趋势强度 + 量能确认',
+    score: ['MA20>MA50>MA200(+30)', '价>MA20(+20)', 'ADX>25(+20)', 'RSI 50-70(+20)', '量比>1(+10)'],
+  },
+  {
+    id: 'down',
+    name: '下跌趋势',
+    desc: '空头排列 + 趋势强度 + 量能确认',
+    score: ['MA20<MA50<MA200(+30)', '价<MA20(+20)', 'ADX>25(+20)', 'RSI<40(+20)', '量比>1(+10)'],
+  },
+  {
+    id: 'top',
+    name: '山顶转折',
+    desc: '超买 + 情绪拥挤（费率/多空比/OI）',
+    score: ['RSI(6)≥80(+25)', '乖离>10%(+20)', '资金费率>0.05%(+20)', '多空比>1.5(+15)', 'OI冲高滞涨(+20)'],
+  },
+  {
+    id: 'bottom',
+    name: '山底待涨',
+    desc: '超卖 + 情绪出清（费率/多空比/OI）',
+    score: ['RSI(6)≤20(+25)', '乖离<-10%(+20)', '资金费率<-0.05%(+20)', '多空比<0.8(+15)', 'OI见顶回落+放量(+20)'],
+  },
+]
+
+// ADX(14)：Wilder 平滑趋势强度
+export function adx(klines, period = 14) {
+  const n = klines.length
+  if (n < period * 2) return null
+  let trSum = 0, pdmSum = 0, ndmSum = 0
+  const tr = [], pdm = [], ndm = []
+  for (let i = 1; i < n; i++) {
+    const hl = klines[i].high - klines[i].low
+    const hpc = Math.abs(klines[i].high - klines[i - 1].close)
+    const lpc = Math.abs(klines[i].low - klines[i - 1].close)
+    tr.push(Math.max(hl, hpc, lpc))
+    const up = klines[i].high - klines[i - 1].high
+    const dn = klines[i - 1].low - klines[i].low
+    pdm.push(up > dn && up > 0 ? up : 0)
+    ndm.push(dn > up && dn > 0 ? dn : 0)
+  }
+  let prevTr = 0, prevPdm = 0, prevNdm = 0
+  for (let i = 0; i < period; i++) {
+    trSum += tr[i]; pdmSum += pdm[i]; ndmSum += ndm[i]
+  }
+  prevTr = trSum / period; prevPdm = pdmSum / period; prevNdm = ndmSum / period
+  let dxSum = 0
+  for (let i = period; i < tr.length; i++) {
+    prevTr = (prevTr * (period - 1) + tr[i]) / period
+    prevPdm = (prevPdm * (period - 1) + pdm[i]) / period
+    prevNdm = (prevNdm * (period - 1) + ndm[i]) / period
+    const pDI = (prevPdm / prevTr) * 100
+    const nDI = (prevNdm / prevTr) * 100
+    const dx = pDI + nDI === 0 ? 0 : (Math.abs(pDI - nDI) / (pDI + nDI)) * 100
+    if (i - period < period) dxSum += dx
+  }
+  return dxSum / period
+}
+
+function ma(closes, period) {
+  if (closes.length < period) return null
+  let s = 0
+  for (let i = closes.length - period; i < closes.length; i++) s += closes[i]
+  return s / period
+}
+
+export function buildKlineFeatures(klines) {
+  const closes = klines.map((k) => k.close)
+  const n = closes.length
+  const last = klines[n - 1]
+  const ma20 = ma(closes, 20)
+  const ma50 = ma(closes, 50)
+  const ma200 = ma(closes, 200)
+  const rsi14 = rsiSeries(closes, 14)
+  const rsi6 = rsiSeries(closes, 6)
+  const avgVol = closes.slice(-20).reduce((a, _, i) => a + klines[n - 20 + i].volume, 0) / 20
+  const dev20 = ma20 ? ((last.close - ma20) / ma20) * 100 : null
+  const ret20 = n > 21 ? ((last.close - closes[n - 21]) / closes[n - 21]) * 100 : null
+  return {
+    price: last.close,
+    ma20, ma50, ma200,
+    rsi14: rsi14[n - 1],
+    rsi6: rsi6[n - 1],
+    adx: adx(klines),
+    dev20,
+    ret20,
+    volRatio: avgVol ? last.volume / avgVol : null,
+    hi20: Math.max(...closes.slice(-20)),
+    lo20: Math.min(...closes.slice(-20)),
+  }
+}
+
+// 顶部信号：RSI 超买 + 乖离 + 资金费率 + 多空比 + OI
+export function scoreTop(f) {
+  let s = 0
+  const sig = []
+  if (f.rsi6 >= 80) { s += 25; sig.push('RSI6≥80') }
+  else if (f.rsi6 >= 70) { s += 15; sig.push('RSI6≥70') }
+  if (f.dev20 !== null && f.dev20 >= 10) { s += 20; sig.push(`乖离+${f.dev20.toFixed(1)}%`) }
+  else if (f.dev20 !== null && f.dev20 >= 6) { s += 12; sig.push(`乖离+${f.dev20.toFixed(1)}%`) }
+  if (f.fundingRate !== null && f.fundingRate >= 0.05) { s += 20; sig.push('费率拥挤') }
+  else if (f.fundingRate !== null && f.fundingRate >= 0.01) { s += 10; sig.push('费率偏高') }
+  if (f.lsRatio !== null && f.lsRatio > 1.5) { s += 15; sig.push(`多空比${f.lsRatio.toFixed(2)}`) }
+  else if (f.lsRatio !== null && f.lsRatio > 1.1) { s += 8; sig.push(`多空比${f.lsRatio.toFixed(2)}`) }
+  if (f.oiStall) { s += 20; sig.push('OI冲高滞涨') }
+  return { score: s, sig }
+}
+
+export function scoreBottom(f) {
+  let s = 0
+  const sig = []
+  if (f.rsi6 <= 20) { s += 25; sig.push('RSI6≤20') }
+  else if (f.rsi6 <= 30) { s += 15; sig.push('RSI6≤30') }
+  if (f.dev20 !== null && f.dev20 <= -10) { s += 20; sig.push(`乖离${f.dev20.toFixed(1)}%`) }
+  else if (f.dev20 !== null && f.dev20 <= -6) { s += 12; sig.push(`乖离${f.dev20.toFixed(1)}%`) }
+  if (f.fundingRate !== null && f.fundingRate <= -0.05) { s += 20; sig.push('费率极负') }
+  else if (f.fundingRate !== null && f.fundingRate <= -0.01) { s += 10; sig.push('费率为负') }
+  if (f.lsRatio !== null && f.lsRatio < 0.8) { s += 15; sig.push(`多空比${f.lsRatio.toFixed(2)}`) }
+  else if (f.lsRatio !== null && f.lsRatio < 1) { s += 8; sig.push(`多空比${f.lsRatio.toFixed(2)}`) }
+  if (f.oiWashout) { s += 20; sig.push('OI见顶回落') }
+  return { score: s, sig }
+}
+
+export function scoreUp(f) {
+  let s = 0
+  const sig = []
+  if (f.ma20 > f.ma50 && f.ma50 > f.ma200) { s += 30; sig.push('多头排列') }
+  else if (f.ma20 > f.ma50) { s += 15; sig.push('MA20>MA50') }
+  if (f.price > f.ma20) { s += 20; sig.push('价>MA20') }
+  if (f.adx !== null && f.adx > 25) { s += 20; sig.push(`ADX ${f.adx.toFixed(1)}`) }
+  if (f.rsi14 !== null && f.rsi14 >= 50 && f.rsi14 <= 70) { s += 20; sig.push(`RSI ${f.rsi14.toFixed(1)}`) }
+  else if (f.rsi14 !== null && f.rsi14 > 70) { s += 8; sig.push('RSI偏热') }
+  if (f.volRatio !== null && f.volRatio > 1) { s += 10; sig.push(`量比${f.volRatio.toFixed(2)}`) }
+  return { score: s, sig }
+}
+
+export function scoreDown(f) {
+  let s = 0
+  const sig = []
+  if (f.ma20 < f.ma50 && f.ma50 < f.ma200) { s += 30; sig.push('空头排列') }
+  else if (f.ma20 < f.ma50) { s += 15; sig.push('MA20<MA50') }
+  if (f.price < f.ma20) { s += 20; sig.push('价<MA20') }
+  if (f.adx !== null && f.adx > 25) { s += 20; sig.push(`ADX ${f.adx.toFixed(1)}`) }
+  if (f.rsi14 !== null && f.rsi14 < 40) { s += 20; sig.push(`RSI ${f.rsi14.toFixed(1)}`) }
+  if (f.volRatio !== null && f.volRatio > 1) { s += 10; sig.push(`量比${f.volRatio.toFixed(2)}`) }
+  return { score: s, sig }
+}
+
+// OI 信号：冲高滞涨（顶）/ 见顶回落+放量（底）
+export function oiSignals(oiList, klines) {
+  if (!oiList || oiList.length < 6 || !klines || klines.length < 2) return { oiStall: false, oiWashout: false }
+  const vals = oiList.map((o) => o.oi)
+  const n = vals.length
+  const peak = Math.max(...vals)
+  const peakIdx = vals.indexOf(peak)
+  const lastVal = vals[n - 1]
+  const prevVal = vals[n - 2]
+  const lastK = klines[klines.length - 1]
+  const prevK = klines[klines.length - 2]
+  const pricePeak = peakIdx <= n - 3
+  const recentDecline = peak - lastVal > peak * 0.05
+  const oiStall = pricePeak && !recentDecline && lastVal >= vals[0]
+  const volSpike = lastK.volume > prevK.volume * 1.5
+  const oiWashout = recentDecline && lastK.close < prevK.close && volSpike
+  return { oiStall, oiWashout }
+}
+
+export async function scanStrategies(strategies, opts = {}) {
+  if (state.running) throw new Error('已有扫描进行中，请稍候')
+  const ids = Array.isArray(strategies) ? strategies : [strategies]
+  const want = new Set(ids.filter((id) => STRATEGIES.some((s) => s.id === id)))
+  if (!want.size) throw new Error('至少选择一个策略')
+
+  state.running = true
+  state.total = 0
+  state.done = 0
+  state.found = 0
+  state.errors = 0
+  state.startAt = Date.now()
+  try {
+    const symbols = await getPerpetualSymbols()
+    const listingDate = buildListingDates()
+    const month = (opts.month || '').trim()
+    let candidates = symbols
+    if (month) {
+      if (!/^\d{4}-\d{2}$/.test(month)) throw new Error('月份格式应为 YYYY-MM')
+      candidates = symbols.filter((s) => {
+        const d = listingDate(s)
+        return d !== null && d !== undefined && monthKey(d) === month
+      })
+    }
+    state.total = candidates.length
+    const minScore = opts.minScore ?? 60
+    const results = []
+
+    await mapLimit(candidates, 4, async (sym) => {
+      try {
+        const kl = await getFuturesKlines(sym, '1d', 120)
+        if (kl.length < 40) return
+        const f = buildKlineFeatures(kl)
+        const listed = listingDate(sym)
+        const row = {
+          symbol: sym,
+          listed: listed ? monthKey(listed) : '',
+          price: f.price,
+          metrics: {},
+          signals: [],
+          strategy: [],
+        }
+        let any = false
+
+        for (const sid of want) {
+          let res = null
+          if (sid === 'up') {
+            res = scoreUp(f)
+            row.metrics = { ...row.metrics, ma20: f.ma20, ma50: f.ma50, ma200: f.ma200, adx: f.adx, rsi14: f.rsi14, volRatio: f.volRatio, dev20: f.dev20 }
+          } else if (sid === 'down') {
+            res = scoreDown(f)
+            row.metrics = { ...row.metrics, ma20: f.ma20, ma50: f.ma50, ma200: f.ma200, adx: f.adx, rsi14: f.rsi14, volRatio: f.volRatio, dev20: f.dev20 }
+          } else if (sid === 'top' || sid === 'bottom') {
+            const overbought = (f.rsi6 !== null && f.rsi6 >= 70) || (f.dev20 !== null && f.dev20 >= 6)
+            const oversold = (f.rsi6 !== null && f.rsi6 <= 30) || (f.dev20 !== null && f.dev20 <= -6)
+            const isCandidate = sid === 'top' ? overbought : oversold
+            if (!isCandidate) continue
+            let fr = null
+            let ls = null
+            let oi = null
+            try {
+              const funding = await getFundingRates()
+              fr = funding.get(sym) ?? null
+            } catch { /* 费率不可用则忽略 */ }
+            try {
+              ls = await getLongShortRatio(sym)
+            } catch { /* 多空比不可用则忽略 */ }
+            try {
+              oi = await getOpenInterestHistory(sym, '1d', 10)
+            } catch { /* OI 不可用则忽略 */ }
+            const oiSig = oiSignals(oi, kl)
+            const full = { ...f, fundingRate: fr, lsRatio: ls ? ls.ratio : null, ...oiSig }
+            res = sid === 'top' ? scoreTop(full) : scoreBottom(full)
+            row.metrics = { ...row.metrics, rsi6: f.rsi6, dev20: f.dev20, fundingRate: fr, lsRatio: full.lsRatio, oiLast: oi && oi.length ? oi[oi.length - 1].oi : null, oiStall: oiSig.oiStall, oiWashout: oiSig.oiWashout }
+          }
+          if (res && res.score >= minScore) {
+            row.strategy.push(sid)
+            row.score = Math.max(row.score || 0, res.score)
+            row.signals.push(...res.sig)
+            any = true
+          }
+        }
+
+        if (any) {
+          results.push(row)
+          state.found = results.length
+        }
+      } catch {
+        state.errors++
+      }
+      state.done++
+    })
+
+    results.sort((a, b) => (b.score || 0) - (a.score || 0))
+    lastResults = {
+      mode: 'strategies',
+      strategies: [...want],
+      minScore,
+      month: (opts.month || '').trim(),
+      results,
+      generatedAt: Date.now(),
+    }
+    persistResults()
+    return lastResults
+  } finally {
+    state.running = false
+    state.lastScanAt = Date.now()
+  }
 }
 
 async function mapLimit(items, limit, fn) {

@@ -13,7 +13,18 @@
 
 ## 1. 我们在做什么任务
 
-为币安监控面板新增并完善 **「指标选股」（Screener）** 功能：一键全量扫描币安 **USDT 永续合约（约 400+ 个）**，按 5 条技术指标规则筛选出候选币种，结果以矩阵表展示并支持点击跳转行情图。
+为币安监控面板新增并完善 **「指标选股」（Screener）** 功能。当前包含两套筛选：
+
+**A. 四类策略筛选器（新，主功能）**：一键全量扫描币安 **USDT 永续合约（约 400+ 个）**，按四个策略评分选股（0-100 权重制，默认保留 ≥60 分），结果按评分降序：
+
+| 策略 | 评分构成 |
+|------|----------|
+| 上涨趋势 | MA20>MA50>MA200(+30) + 价>MA20(+20) + ADX>25(+20) + RSI 50-70(+20) + 量比>1(+10) |
+| 下跌趋势 | MA20<MA50<MA200(+30) + 价<MA20(+20) + ADX>25(+20) + RSI<40(+20) + 量比>1(+10) |
+| 山顶转折 | RSI(6)≥80(+25) + 乖离>10%(+20) + 资金费率>0.05%(+20) + 多空比>1.5(+15) + OI冲高滞涨(+20) |
+| 山底待涨 | RSI(6)≤20(+25) + 乖离<-10%(+20) + 资金费率<-0.05%(+20) + 多空比<0.8(+15) + OI见顶回落+放量(+20) |
+
+**B. 规则扫描（旧功能保留）**：按 5 条技术指标规则筛选，可勾选、可切「任一/全部」，见下。
 
 5 条规则（定义见 `server/screener.js` 的 `RULES`）：
 
@@ -31,7 +42,17 @@
 
 ## 2. 我们已经完成了什么（全部已提交并推送）
 
-功能完整可用，已合入 main 并推送（当前 HEAD 为 `20db6fb`）。新增：新币/套利**邮件通知失败自动重试**（见下）。
+### 四类策略筛选器（2026-08 新增）
+- `server/binance.js`：新增 `getFundingRates()`（`/premiumIndex` 无参一次取全市场，5min 内存缓存，Map symbol→lastFundingRate）与 `getLongShortRatio(symbol)`（`topLongShortAccountRatio?period=1d&limit=1`，10min Map 缓存，返回 `{ratio,long,short}` 或 null）。注意 `getFundingRates` 返回 **Map**，取值要用 `.get(sym)` 不是 `[sym]`。
+- `server/screener.js`：
+  - 新增 `STRATEGIES` 元数据、`buildKlineFeatures()`（MA20/50/200、RSI6/RSI14、ADX、乖离 dev20、量比、20日高低）、`adx()`（Wilder 平滑）、`scoreUp/scoreDown/scoreTop/scoreBottom`、`oiSignals()`（OI冲高滞涨/见顶回落）。
+  - 新增 `scanStrategies(strategies, { month, minScore })` 入口：趋势策略只用已落库日K（零新增请求）；反转策略先按 RSI/乖离初筛候选池 → 只对候选拉资金费率/多空比/OI。输出统一 `{symbol, listed, price, score, signals[], strategy[], metrics{}}`，持久化到同一 `data/scan-results.json`（meta.mode='strategies'）。
+- `server/index.js`：`GET /api/screener` 附带 `strategies` 元数据；新增 `POST /api/screener/strategies`（body: `{strategies:[], month, minScore}`）。
+- `src/api/monitor.js`：新增 `startScreenerStrategies(strategies, month, minScore)`。
+- `src/components/ScreenerPanel.vue`：四个策略 Tab + 规则扫描 Tab；每个策略显示评分构成；最低评分可调；表格列评分/信号标签/指标列，点击行跳行情图。加载历史结果时若为 strategies 模式自动切到对应 Tab。
+- **未实测**：本机连不上币安 API，资金费率/多空比字段与币安实际返回是否一致需线上验证（HANDOFF 第 3 节）。
+
+功能完整可用，已合入 main 并推送。新增：新币/套利**邮件通知失败自动重试**（见下）。
 
 ### 后端
 - `server/binance.js`
@@ -125,17 +146,13 @@
 
 ## 4. 下一步计划是什么（按优先级）
 
-1. **由用户实测线上扫描**：确认服务器已跑最新代码（即将发生），在页面上点「指标选股 → 开始扫描」，确认：
-   - OI 列有值（不再全空，即便未命中规则也显示数值+箭头）
+1. **由用户实测四类策略扫描**：确认服务器已跑最新代码，在页面上「指标选股」分别切四个策略 Tab 扫描，确认：
+   - 评分/信号标签/指标列渲染正常，点击行跳行情
+   - **资金费率 / 多空比字段与币安实际返回一致**（`getFundingRates` 的 `lastFundingRate`、`topLongShortAccountRatio` 的 `longShortRatio/longAccount/shortAccount`），若不符需调整字段名
    - 扫描过程不报 429/418、不封 IP、能正常跑完
-   - 命中结果合理性
-   - 修改密码生效（验证旧 bug 已随新代码修复）
-
-2. **若 OI 仍全空或扫描报错**：查 `docker logs` 容器日志，重点看 `openInterestHistory` 是否被区域/限流拦截（本机无法复现，需服务器侧证据）。
-
-3. **可选增强**（用户曾提过，未实现）：
-   - 增加一条 **底背离** 规则（当前 5 条偏「强势/做空回转」方向）。
-   - 将某条规则做成「只高亮不自动提醒」，或加自动邮件告警。
+2. **若反转策略 OI/费率/多空比全空**：查 `docker logs` 容器日志，重点看 `premiumIndex` / `topLongShortAccountRatio` 是否被区域/限流拦截（本机无法复现，需服务器侧证据）。
+3. **验证规则扫描仍可用**：规则 Tab 是旧功能，确保回归无碍。
+4. **可选增强**（用户曾提过，未实现）：底背离规则；评分制再调权重/阈值。
 
 ---
 

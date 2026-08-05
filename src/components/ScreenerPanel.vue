@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
-import { startScreener, screenerStatus, fetchScreenerResults } from '../api/monitor'
+import { startScreener, startScreenerStrategies, screenerStatus, fetchScreenerResults } from '../api/monitor'
 import { store } from '../store'
 
 const RULES = [
@@ -11,9 +11,18 @@ const RULES = [
   { id: 'r5', name: '单日量 > 近7日总和', desc: '最近一根日K成交量大于之前 7 天之和' },
 ]
 
+const STRATEGIES = [
+  { id: 'up', name: '上涨趋势', desc: '多头排列 + 趋势强度 + 量能确认', score: ['MA20>MA50>MA200 (+30)', '价>MA20 (+20)', 'ADX>25 (+20)', 'RSI 50-70 (+20)', '量比>1 (+10)'] },
+  { id: 'down', name: '下跌趋势', desc: '空头排列 + 趋势强度 + 量能确认', score: ['MA20<MA50<MA200 (+30)', '价<MA20 (+20)', 'ADX>25 (+20)', 'RSI<40 (+20)', '量比>1 (+10)'] },
+  { id: 'top', name: '山顶转折', desc: '超买 + 情绪拥挤（费率/多空比/OI）', score: ['RSI(6)≥80 (+25)', '乖离>10% (+20)', '资金费率>0.05% (+20)', '多空比>1.5 (+15)', 'OI冲高滞涨 (+20)'] },
+  { id: 'bottom', name: '山底待涨', desc: '超卖 + 情绪出清（费率/多空比/OI）', score: ['RSI(6)≤20 (+25)', '乖离<-10% (+20)', '资金费率<-0.05% (+20)', '多空比<0.8 (+15)', 'OI见顶回落+放量 (+20)'] },
+]
+
+const view = ref('up')
 const checked = ref({ r1: true, r2: true, r3: true, r4: true, r5: true })
 const mode = ref('any')
 const month = ref('')
+const minScore = ref(60)
 const loading = ref(false)
 const error = ref('')
 const rows = ref([])
@@ -22,6 +31,7 @@ const state = ref(null)
 let timer = null
 
 const enabledCount = computed(() => RULES.filter((r) => checked.value[r.id]).length)
+const currentStrategy = computed(() => STRATEGIES.find((s) => s.id === view.value))
 
 const progress = computed(() => {
   const s = state.value
@@ -43,6 +53,11 @@ function stopPoll() {
   }
 }
 
+function openChart(symbol) {
+  store.chartSymbol = symbol
+  store.activeTab = 'chart'
+}
+
 function fmtPrice(v) {
   if (v === null || v === undefined || Number.isNaN(v)) return '—'
   if (v >= 1000) return v.toFixed(2)
@@ -56,6 +71,16 @@ function fmtOi(v) {
   if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B'
   if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M'
   return v.toFixed(0)
+}
+
+function fmtRate(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—'
+  return (v * 100).toFixed(3) + '%'
+}
+
+function fmtNum(v, digits = 2) {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—'
+  return Number(v).toFixed(digits)
 }
 
 function buildCells(row) {
@@ -84,6 +109,41 @@ function buildCells(row) {
   return cells
 }
 
+const strategyCols = {
+  up: [
+    { key: 'ma20', label: 'MA20', fmt: (v) => fmtPrice(v) },
+    { key: 'ma50', label: 'MA50', fmt: (v) => fmtPrice(v) },
+    { key: 'ma200', label: 'MA200', fmt: (v) => fmtPrice(v) },
+    { key: 'adx', label: 'ADX', fmt: (v) => fmtNum(v, 1) },
+    { key: 'rsi14', label: 'RSI14', fmt: (v) => fmtNum(v, 1) },
+    { key: 'dev20', label: '乖离', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(1) + '%') },
+    { key: 'volRatio', label: '量比', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(2) + 'x') },
+  ],
+  down: [
+    { key: 'ma20', label: 'MA20', fmt: (v) => fmtPrice(v) },
+    { key: 'ma50', label: 'MA50', fmt: (v) => fmtPrice(v) },
+    { key: 'ma200', label: 'MA200', fmt: (v) => fmtPrice(v) },
+    { key: 'adx', label: 'ADX', fmt: (v) => fmtNum(v, 1) },
+    { key: 'rsi14', label: 'RSI14', fmt: (v) => fmtNum(v, 1) },
+    { key: 'dev20', label: '乖离', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(1) + '%') },
+    { key: 'volRatio', label: '量比', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(2) + 'x') },
+  ],
+  top: [
+    { key: 'rsi6', label: 'RSI6', fmt: (v) => fmtNum(v, 1) },
+    { key: 'dev20', label: '乖离', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(1) + '%') },
+    { key: 'fundingRate', label: '资金费率', fmt: (v) => fmtRate(v) },
+    { key: 'lsRatio', label: '多空比', fmt: (v) => fmtNum(v, 2) },
+    { key: 'oiLast', label: 'OI', fmt: (v) => fmtOi(v) },
+  ],
+  bottom: [
+    { key: 'rsi6', label: 'RSI6', fmt: (v) => fmtNum(v, 1) },
+    { key: 'dev20', label: '乖离', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(1) + '%') },
+    { key: 'fundingRate', label: '资金费率', fmt: (v) => fmtRate(v) },
+    { key: 'lsRatio', label: '多空比', fmt: (v) => fmtNum(v, 2) },
+    { key: 'oiLast', label: 'OI', fmt: (v) => fmtOi(v) },
+  ],
+}
+
 function applyRows(list) {
   rows.value = (list || []).map((row) => ({ ...row, cells: buildCells(row) }))
 }
@@ -98,7 +158,12 @@ async function run() {
   stopPoll()
   timer = setInterval(poll, 1000)
   try {
-    const res = await startScreener({ ...checked.value }, mode.value, month.value)
+    let res
+    if (view.value === 'rules') {
+      res = await startScreener({ ...checked.value }, mode.value, month.value)
+    } else {
+      res = await startScreenerStrategies([view.value], month.value, minScore.value)
+    }
     applyRows(res.results)
     meta.value = res
   } catch (e) {
@@ -115,7 +180,10 @@ async function run() {
 onMounted(async () => {
   try {
     const res = await fetchScreenerResults()
-    if (res.results && res.results.length) applyRows(res.results)
+    if (res.results && res.results.length) {
+      if (res.mode === 'strategies' && res.strategies && res.strategies.length) view.value = res.strategies[0]
+      applyRows(res.results)
+    }
     if (res.generatedAt) meta.value = res
   } catch {}
 })
@@ -127,12 +195,33 @@ onBeforeUnmount(stopPoll)
   <div class="screen">
     <div class="head">
       <h2>指标选股（全量 USDT 永续合约）</h2>
-      <button class="btn" :disabled="loading || enabledCount === 0" @click="run">
+      <button class="btn" :disabled="loading || (view === 'rules' && enabledCount === 0)" @click="run">
         {{ loading ? '扫描中…' : '开始扫描' }}
       </button>
     </div>
 
-    <div class="rules">
+    <div class="strat-tabs">
+      <button
+        v-for="s in STRATEGIES"
+        :key="s.id"
+        :class="{ active: view === s.id }"
+        :disabled="loading"
+        @click="view = s.id"
+      >
+        {{ s.name }}
+      </button>
+      <button :class="{ active: view === 'rules' }" :disabled="loading" @click="view = 'rules'">规则扫描</button>
+    </div>
+
+    <div v-if="currentStrategy" class="strat-desc">
+      <b>{{ currentStrategy.name }}</b>
+      <span>{{ currentStrategy.desc }}</span>
+      <div class="score-break">
+        <span v-for="(pt, i) in currentStrategy.score" :key="i">{{ pt }}</span>
+      </div>
+    </div>
+
+    <div v-if="view === 'rules'" class="rules">
       <div v-for="r in RULES" :key="r.id" class="rule">
         <label class="check">
           <input v-model="checked[r.id]" type="checkbox" :disabled="loading" />
@@ -143,15 +232,24 @@ onBeforeUnmount(stopPoll)
     </div>
 
     <div class="ctrl-row">
-      <span class="mode-label">匹配逻辑：</span>
-      <div class="seg">
-        <button :class="{ active: mode === 'any' }" :disabled="loading" @click="mode = 'any'">任一满足</button>
-        <button :class="{ active: mode === 'all' }" :disabled="loading" @click="mode = 'all'">全部满足</button>
-      </div>
+      <template v-if="view === 'rules'">
+        <span class="mode-label">匹配逻辑：</span>
+        <div class="seg">
+          <button :class="{ active: mode === 'any' }" :disabled="loading" @click="mode = 'any'">任一满足</button>
+          <button :class="{ active: mode === 'all' }" :disabled="loading" @click="mode = 'all'">全部满足</button>
+        </div>
+      </template>
+      <template v-else>
+        <span class="mode-label">最低评分：</span>
+        <input v-model.number="minScore" type="number" min="0" max="100" class="score-input" :disabled="loading" />
+      </template>
       <span class="mode-label">上架月份：</span>
       <input v-model="month" type="month" class="month-input" :disabled="loading" title="仅筛选在指定月份于币安上架的合约，留空则不限制" />
       <button v-if="month" class="clear-btn" :disabled="loading" @click="month = ''">清空</button>
-      <span class="note">已勾选 {{ enabledCount }} 个规则 · 全量约 400+ 合约，为防 IP 限流已强制降速，首次约需 2-4 分钟；选择上架月份后只扫描该月上架的合约</span>
+      <span class="note">
+        <template v-if="view === 'rules'">已勾选 {{ enabledCount }} 个规则 · 全量约 400+ 合约，为防 IP 限流已强制降速，首次约需 2-4 分钟；选择上架月份后只扫描该月上架的合约</template>
+        <template v-else>{{ currentStrategy.name }}：趋势策略仅用已缓存日K（零新增请求）；转折策略先按 RSI/乖离初筛候选池，再对候选拉取费率/多空比/OI，全量约需 1-2 分钟</template>
+      </span>
       <span v-if="meta" class="note right">最近扫描 {{ new Date(meta.generatedAt).toLocaleString('zh-CN') }}，命中 {{ rows.length }} 个<span v-if="meta.month">（上架 {{ meta.month }}）</span></span>
     </div>
 
@@ -170,14 +268,20 @@ onBeforeUnmount(stopPoll)
     <div v-else-if="rows.length" class="table-wrap">
       <table class="tbl">
         <thead>
-          <tr>
+          <tr v-if="view === 'rules'">
             <th>币种</th>
             <th>上架</th>
             <th v-for="r in RULES" :key="r.id" :class="{ off: !checked[r.id] }" :title="r.desc">{{ r.name }}</th>
           </tr>
+          <tr v-else>
+            <th>币种</th>
+            <th>评分</th>
+            <th>信号</th>
+            <th v-for="c in strategyCols[view]" :key="c.key">{{ c.label }}</th>
+          </tr>
         </thead>
         <tbody>
-          <tr v-for="r in rows" :key="r.symbol" @click="openChart(r.symbol)">
+          <tr v-if="view === 'rules'" v-for="r in rows" :key="r.symbol" @click="openChart(r.symbol)">
             <td class="sym">
               {{ r.symbol }}
               <span class="price-sub">{{ fmtPrice(r.price) }}</span>
@@ -190,9 +294,23 @@ onBeforeUnmount(stopPoll)
               <template v-else>—</template>
             </td>
           </tr>
+          <tr v-for="r in rows" v-else :key="r.symbol" @click="openChart(r.symbol)">
+            <td class="sym">
+              {{ r.symbol }}
+              <span class="price-sub">{{ fmtPrice(r.price) }}</span>
+            </td>
+            <td><b class="score">{{ r.score }}</b></td>
+            <td>
+              <span v-for="(s, i) in (r.signals || [])" :key="i" class="tag">{{ s }}</span>
+            </td>
+            <td v-for="c in strategyCols[view]" :key="c.key">{{ c.fmt(r.metrics[c.key]) }}</td>
+          </tr>
         </tbody>
       </table>
-      <div class="tips">点击行跳转行情图表。绿色列=命中规则；OI 列显示最近 5 天的末值并带涨跌箭头（绿色=命中「持续增加」）；「—」表示该规则未勾选或无数据。已内置币安限流保护：低并发+请求间隔+429/418 自动退避；K线/OI 缓存 1 小时并落盘（重启不丢），重复扫描直接复用、几乎零 API 消耗。</div>
+      <div class="tips">
+        <template v-if="view === 'rules'">点击行跳转行情图表。绿色列=命中规则；OI 列显示最近 5 天的末值并带涨跌箭头（绿色=命中「持续增加」）；「—」表示该规则未勾选或无数据。已内置币安限流保护：低并发+请求间隔+429/418 自动退避；K线/OI 缓存 1 小时并落盘（重启不丢），重复扫描直接复用、几乎零 API 消耗。</template>
+        <template v-else>点击行跳转行情图表。评分为 0-100 权重制，仅保留达到最低评分的合约，按评分降序排列。信号标签说明命中的子条件；转折策略的资金费率/多空比来自币安逐币数据接口（缺失显示 —），若线上字段结构与预期不符请告知。</template>
+      </div>
     </div>
   </div>
 </template>
@@ -225,6 +343,53 @@ onBeforeUnmount(stopPoll)
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+.strat-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.strat-tabs button {
+  background: #161a1e;
+  border: 1px solid #2b3139;
+  color: #848e9c;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.strat-tabs button.active {
+  background: #f0b90b;
+  border-color: #f0b90b;
+  color: #0b0e11;
+  font-weight: 600;
+}
+.strat-tabs button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.strat-desc {
+  background: #161a1e;
+  border: 1px solid #2b3139;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  color: #eaecef;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.strat-desc b {
+  color: #f0b90b;
+}
+.score-break {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  color: #848e9c;
+  font-size: 12px;
 }
 .rules {
   display: flex;
@@ -310,6 +475,23 @@ onBeforeUnmount(stopPoll)
   outline: none;
 }
 .month-input:disabled {
+  opacity: 0.6;
+}
+.score-input {
+  background: #1e2329;
+  border: 1px solid #2b3139;
+  border-radius: 6px;
+  color: #eaecef;
+  padding: 4px 8px;
+  font-size: 13px;
+  width: 64px;
+  color-scheme: dark;
+}
+.score-input:focus {
+  border-color: #f0b90b;
+  outline: none;
+}
+.score-input:disabled {
   opacity: 0.6;
 }
 .clear-btn {
@@ -409,6 +591,20 @@ onBeforeUnmount(stopPoll)
   font-weight: 400;
   font-size: 12px;
   font-family: 'SF Mono', Menlo, monospace;
+}
+.score {
+  color: #f0b90b;
+  font-size: 15px;
+}
+.tag {
+  display: inline-block;
+  background: #1e2329;
+  border: 1px solid #2b3139;
+  color: #f0b90b;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  margin-right: 4px;
 }
 .up {
   color: #0ecb81;

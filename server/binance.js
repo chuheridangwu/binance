@@ -194,6 +194,44 @@ export async function getOpenInterestHistory(symbol, period = '1d', limit = 7) {
   }
 }
 
+let fundingCache = null
+let fundingCacheExp = 0
+
+// 全市场资金费率：premiumIndex 不带 symbol 一次返回全部，5 分钟内存缓存
+export async function getFundingRates() {
+  if (fundingCache && fundingCacheExp > Date.now()) return fundingCache
+  const data = await getJson(`${FUTURES}/premiumIndex`)
+  const map = new Map()
+  if (Array.isArray(data)) {
+    for (const d of data) map.set(d.symbol, +d.lastFundingRate || 0)
+  }
+  fundingCache = map
+  fundingCacheExp = Date.now() + 5 * 60 * 1000
+  return map
+}
+
+const lsCache = new Map()
+
+// 大户多空比（持仓账户口径），10 分钟内存缓存；数据接口无法批量，只能逐币
+export async function getLongShortRatio(symbol) {
+  const c = lsCache.get(symbol)
+  if (c && c.exp > Date.now()) return c.data
+  let data = []
+  try {
+    data = await getJson(
+      `${FUTURES}/futures/data/topLongShortAccountRatio?symbol=${symbol}&period=1d&limit=1`
+    )
+  } catch {
+    /* 数据接口偶发失败，返回 null */
+  }
+  const row = Array.isArray(data) && data.length ? data[0] : null
+  const out = row
+    ? { ratio: +row.longShortRatio || 0, long: +row.longAccount || 0, short: +row.shortAccount || 0 }
+    : null
+  lsCache.set(symbol, { data: out, exp: Date.now() + 10 * 60 * 1000 })
+  return out
+}
+
 export async function getFirstKlineTime(symbol, market) {
   const base = market === 'futures' ? FUTURES : SPOT
   try {

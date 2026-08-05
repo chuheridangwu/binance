@@ -185,8 +185,10 @@ onMounted(async () => {
   try {
     const res = await fetchScreenerResults()
     if (res.results && res.results.length) {
-      if (res.mode === 'strategies' && res.strategies && res.strategies.length) view.value = res.strategies[0]
-      else if (res.mode === 'rules') view.value = 'rules'
+      if (res.mode === 'strategies' && res.strategies && res.strategies.length) {
+        const first = res.strategies[0]
+        view.value = typeof first === 'object' && first ? first.id || 'up' : first || 'up'
+      } else if (res.mode === 'rules') view.value = 'rules'
       applyRows(res.results)
     }
     if (res.generatedAt) meta.value = res
@@ -253,7 +255,7 @@ onBeforeUnmount(stopPoll)
       <button v-if="month" class="clear-btn" :disabled="loading" @click="month = ''">清空</button>
       <span class="note">
         <template v-if="view === 'rules'">已勾选 {{ enabledCount }} 个规则 · 全量约 400+ 合约，为防 IP 限流已强制降速，首次约需 2-4 分钟；选择上架月份后只扫描该月上架的合约</template>
-        <template v-else>{{ currentStrategy.name }}：趋势策略仅用已缓存日K（零新增请求）；转折策略先按 RSI/乖离初筛候选池，再对候选拉取费率/多空比/OI，全量约需 1-2 分钟</template>
+        <template v-else>{{ currentStrategy ? currentStrategy.name : '' }}：趋势策略仅用已缓存日K（零新增请求）；转折策略先按 RSI/乖离初筛候选池，再对候选拉取费率/布林，全量约需 1-2 分钟</template>
       </span>
       <span v-if="meta" class="note right">最近扫描 {{ new Date(meta.generatedAt).toLocaleString('zh-CN') }}，命中 {{ rows.length }} 个<span v-if="meta.month">（上架 {{ meta.month }}）</span></span>
     </div>

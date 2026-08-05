@@ -86,7 +86,7 @@ app.get('/api/spread', async (req, res) => {
 })
 
 app.get('/api/screener', (_req, res) => {
-  res.json({ ...(screener.getLastResults() || { results: [], mode: 'any', rules: [], generatedAt: 0 }), strategies: screener.STRATEGIES })
+  res.json({ ...(screener.getLastResults() || { results: [], mode: 'any', rules: [], generatedAt: 0 }), strategyDefs: screener.STRATEGIES })
 })
 
 app.get('/api/screener/status', (_req, res) => {

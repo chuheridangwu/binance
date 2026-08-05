@@ -201,10 +201,20 @@ watch(
           <div id="month-chart" class="month-chart"></div>
           <div class="axis">点击柱状图查看当月明细，搜索可过滤</div>
           <div v-if="activeMonth" class="month-detail">
-            <h4>{{ activeMonth.label }}（{{ activeMonth.items.length }} 个）</h4>
+            <h4>{{ activeMonth.label }}（{{ activeMonth.items.length }} 个）
+              <span class="legend">
+                <span><i class="dot stock"></i>股票代币</span>
+                <span><i class="dot commodity"></i>商品代币</span>
+                <span><i class="dot delisted"></i>已下架</span>
+              </span>
+            </h4>
             <div class="tags">
               <span v-for="it in activeMonth.items" :key="it.symbol" class="tag" @click="openChart(it)">
-                {{ it.symbol }} <small>{{ String(it.date).slice(0, 10) }}</small>
+                {{ it.symbol }}
+                <i v-if="it.kind === 'stock'" class="badge stock">股票</i>
+                <i v-else-if="it.kind === 'commodity'" class="badge commodity">商品</i>
+                <i v-if="it.delisted" class="badge delisted">已下架</i>
+                <small>{{ String(it.date).slice(0, 10) }}</small>
               </span>
             </div>
           </div>
@@ -462,7 +472,28 @@ watch(
   color: #eaecef;
   margin: 0 0 8px;
   font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
+.legend {
+  display: inline-flex;
+  gap: 10px;
+  font-size: 11px;
+  color: #848e9c;
+  font-weight: normal;
+}
+.legend .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 4px;
+}
+.dot.stock { background: #4f8ef7; }
+.dot.commodity { background: #16b98c; }
+.dot.delisted { background: #f6465d; }
 .tags {
   display: flex;
   flex-wrap: wrap;
@@ -478,6 +509,9 @@ watch(
   font-family: 'SF Mono', Menlo, monospace;
   cursor: pointer;
   transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .tag:hover {
   border-color: #f0b90b;
@@ -485,7 +519,18 @@ watch(
 }
 .tag small {
   color: #848e9c;
-  margin-left: 4px;
+  margin-left: 2px;
   font-family: inherit;
 }
+.badge {
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-style: normal;
+}
+.badge.stock { background: #223458; color: #8ab4ff; }
+.badge.commodity { background: #12352c; color: #43e3b4; }
+.badge.delisted { background: #3a1d24; color: #ff7d8c; }
 </style>

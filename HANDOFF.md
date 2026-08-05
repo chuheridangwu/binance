@@ -72,6 +72,12 @@
 - `/api/listings` 不再有 47 个月截断：从库中最早月份一直生成到当前月（当前约 110 个月，2017-07 起）。前端标题/汇总从「近 4 年/四年总上币」改为「全量/累计上币」。
 - 注意：目录 total 约 1200+ 篇（约 62 页，20/页），含现货/合约/杠杆等公告；`parseListedSymbol` 只认标题末尾 `(XXX)`，非上新标题（margin 增容等）被 `isNewListing` 过滤。
 
+### 月度上新：股票/商品代币与已下架区分
+- `/api/listings` 每项附加 `kind`（`stock`/`commodity`/`crypto`）与 `delisted`（`true`/`false`/`null`=symbols 表为空时未知）：
+  - `classifyKind` 靠**公告标题**判断：`Tokenized Stock`/`股票代币`/`股票` → stock；`Tokenized Commodity`/`商品代币`/`原油`/`黄金` → commodity。股票/商品代币 2021 年上线、BUSD 计价、同年全部下架，已不在 USDT `symbols` 表，故天然标为已下架。
+  - `isDelisted`：用 `symbols` 表 active 集合判定，兼容 base 符号（ARB→查 ARBUSDT）与完整对（BTCUSDT→直接查）。
+- 前端 `ListingsStats.vue`：tag 加 `股票`/`商品`/`已下架` 徽标，标题行加图例。数据来自本地 DB，不新增对外请求。
+
 ### 限流/防制裁与持久化原则
 - **本应用是统计工具，不做爬虫**：所有对外请求都必须走 `binance.js` 的全局限速器（`getJson`：并发≤4、相邻请求≥180ms、429/418 按 retry-after 退避，最多重试 2 次）。**spread.js 已改用共享的 `getJson`**（原先自带裸 fetch、8 并发、无退避，是最薄弱路径）。
 - 公告抓取翻页间隔额外 `sleep(250)`；增量扫描 `maxPages=5`（补全后整页已知会提前停在 1~2 页）；一次性补全 `maxPages=100` 且只在启动时、首轮 runOnce 之后执行，不会与增量并发。

@@ -113,13 +113,19 @@ app.post('/api/screener', async (req, res) => {
 
 app.get('/api/listings', (_req, res) => {
   const now = new Date()
-  const rows = db.prepare('SELECT symbol, date FROM listings ORDER BY date ASC').all()
+  const rows = db.prepare('SELECT symbol, date, title FROM listings ORDER BY date ASC').all()
+  const activeSyms = new Set(db.prepare('SELECT symbol FROM symbols WHERE active = 1').all().map((r) => r.symbol))
   const map = new Map()
   for (const r of rows) {
     const d = new Date(r.date)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     if (!map.has(key)) map.set(key, [])
-    map.get(key).push({ symbol: r.symbol, date: new Date(r.date).toISOString() })
+    map.get(key).push({
+      symbol: r.symbol,
+      date: new Date(r.date).toISOString(),
+      kind: classifyKind(r.symbol, r.title),
+      delisted: isDelisted(r.symbol, activeSyms),
+    })
   }
   const keys = [...map.keys()].sort()
   const months = []
@@ -139,6 +145,26 @@ app.get('/api/listings', (_req, res) => {
   }
   res.json({ total: rows.length, months, generatedAt: Date.now() })
 })
+
+// 代币化股票/商品（2021 年上线、BUSD 计价，随后全部下架）靠标题区分，与普通加密币分开统计
+const STOCK_RE = /tokenized stock|stock token|股票代币|股票/i
+const COMMODITY_RE = /tokenized commodity|commodity token|商品代币|原油|黄金|大宗商品/i
+
+function classifyKind(symbol, title) {
+  const t = String(title || '')
+  if (STOCK_RE.test(t)) return 'stock'
+  if (COMMODITY_RE.test(t)) return 'commodity'
+  return 'crypto'
+}
+
+// 已下架判定：当前币安 USDT 现货/合约里都不在交易即为已下架
+// 公告行符号多为 base（ARB），行情反推行符号为完整对（BTCUSDT），两种都兼容
+function isDelisted(symbol, activeSyms) {
+  if (!activeSyms.size) return null
+  const s = String(symbol).toUpperCase()
+  const cands = s.endsWith('USDT') ? [s] : [s, s + 'USDT']
+  return !cands.some((c) => activeSyms.has(c))
+}
 
 app.get('/api/status', (_req, res) => {
   res.json({

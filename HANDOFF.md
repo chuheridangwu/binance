@@ -82,6 +82,8 @@
 - 前端：`ListingsStats.vue` tag 加 `股票`/`商品`/`已下架` 徽标 + 图例；`KlineChart.vue` 搜索下拉同样显示这三类徽标。数据来自本地 DB，不新增对外请求。
 
 ### 限流/防制裁与持久化原则
+- **重复计数修复（2026-08）**：`scanMarketDiff` 原来用 `getExchangeInfo`（不过滤合约类型，季度/交割合约也会当成新上）且去重 `known` 是公告行的 base 符号（ARB）对比行情反推的完整对（ARBUSDT），导致同一合约被两条路径各记一次。现已改为：① 用 `getPerpetualSymbols()`（只取永续）；② `known` 同时存 base 和完整对两种形态去重。`/api/listings` 读取时再按「月+base」二次去重（公告行优先于行情反推行），历史遗留的重复行也会被折叠。
+- **6 月暴增是真实的**：币安 2026-06 集中上线约 40 个 TradFi 股票/ETF 永续（6/8 八个、6/9 五个、6/10 六个、6/11 六个、6/22/6/29 各一批，含 TQQQ/SQQQ/MVLL），加上 SpaceX IPO 带动的 pre-IPO 合约。
 - **本应用是统计工具，不做爬虫**：所有对外请求都必须走 `binance.js` 的全局限速器（`getJson`：并发≤4、相邻请求≥180ms、429/418 按 retry-after 退避，最多重试 2 次）。**spread.js 已改用共享的 `getJson`**（原先自带裸 fetch、8 并发、无退避，是最薄弱路径）。
 - 公告抓取翻页间隔额外 `sleep(250)`；增量扫描 `maxPages=5`（补全后整页已知会提前停在 1~2 页）；一次性补全 `maxPages=100` 且只在启动时、首轮 runOnce 之后执行，不会与增量并发。
 - 值得持久化的数据一律落库，避免重复拉：`symbols`（币种列表）、`kline_cache`（K线）、`oi_cache`（OI）、`listings`（公告/上新）、`settings`。资金费率/价差属瞬态行情，不落库（5 分钟一次、已限速）。

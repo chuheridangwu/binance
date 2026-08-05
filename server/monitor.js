@@ -1,5 +1,5 @@
 import { db, getSetting, setSetting } from './db.js'
-import { getExchangeInfo, getFirstKlineTime, fetchListingAnnouncements } from './binance.js'
+import { getPerpetualSymbols, getFirstKlineTime, fetchListingAnnouncements } from './binance.js'
 import { sendMail } from './mailer.js'
 import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 
@@ -101,12 +101,20 @@ async function scanAnnouncements() {
 async function scanMarketDiff() {
   let futures = []
   try {
-    futures = await getExchangeInfo('futures')
+    // 只用永续合约，避免把季度/交割合约也当成"新上"
+    futures = await getPerpetualSymbols()
   } catch (e) {
     state.scanErrors.push(`合约exchangeInfo失败: ${e.message}`)
     return
   }
-  const known = new Set(db.prepare('SELECT symbol FROM listings').all().map((r) => r.symbol))
+  // 去重要兼容两种符号格式：公告行是 base（ARB），行情反推行是完整对（ARBUSDT）
+  // 同一合约两条路径只记一次，避免重复计数
+  const known = new Set(
+    db
+      .prepare('SELECT symbol FROM listings')
+      .all()
+      .flatMap((r) => [r.symbol.toUpperCase(), r.symbol.toUpperCase().replace(/USDT$/, '')])
+  )
   const fresh = futures.filter((s) => !known.has(s))
   for (const symbol of fresh) {
     const t = await getFirstKlineTime(symbol, 'futures')

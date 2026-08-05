@@ -113,21 +113,40 @@ app.post('/api/screener', async (req, res) => {
 
 app.get('/api/listings', (_req, res) => {
   const now = new Date()
-  const rows = db.prepare('SELECT symbol, date, title FROM listings ORDER BY date ASC').all()
+  const rows = db.prepare('SELECT symbol, date, title, source FROM listings ORDER BY date ASC').all()
   const activeSyms = new Set(db.prepare('SELECT symbol FROM symbols WHERE active = 1').all().map((r) => r.symbol))
   const underlying = binance.buildUnderlyingMap()
-  const map = new Map()
+  // 同月内同一标的去重：公告行（base 符号、真标题）优先于行情反推行（完整对、泛标题），
+  // 避免同一个合约被两条入库路径重复计数（历史数据里已存在重复行）
+  const seen = new Map()
   for (const r of rows) {
     const d = new Date(r.date)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    if (!map.has(key)) map.set(key, [])
+    const base = String(r.symbol).toUpperCase().replace(/USDT$/, '')
     const kind = binance.classifyKind(r.symbol, r.title, underlying.get(String(r.symbol).toUpperCase()))
-    map.get(key).push({
+    const item = {
       symbol: r.symbol,
-      date: new Date(r.date).toISOString(),
+      date: d.toISOString(),
+      title: r.title,
+      source: r.source,
       kind,
       delisted: isDelisted(r.symbol, activeSyms, kind),
-    })
+    }
+    const pk = `${key}|${base}`
+    const existing = seen.get(pk)
+    if (existing) {
+      // 保留标题更具体的一条（公告行有真标题，行情反推是泛标题）
+      if (r.source === 'announcement' && existing.source !== 'announcement') seen.set(pk, item)
+      continue
+    }
+    seen.set(pk, item)
+  }
+  const map = new Map()
+  for (const item of seen.values()) {
+    const d = new Date(item.date)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    if (!map.has(key)) map.set(key, [])
+    map.get(key).push(item)
   }
   const keys = [...map.keys()].sort()
   const months = []

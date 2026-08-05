@@ -144,6 +144,10 @@ const strategyCols = {
   ],
 }
 
+function metricVal(r, key) {
+  return r.metrics && r.metrics[key] !== undefined && r.metrics[key] !== null ? r.metrics[key] : null
+}
+
 function applyRows(list) {
   rows.value = (list || []).map((row) => ({ ...row, cells: buildCells(row) }))
 }
@@ -182,6 +186,7 @@ onMounted(async () => {
     const res = await fetchScreenerResults()
     if (res.results && res.results.length) {
       if (res.mode === 'strategies' && res.strategies && res.strategies.length) view.value = res.strategies[0]
+      else if (res.mode === 'rules') view.value = 'rules'
       applyRows(res.results)
     }
     if (res.generatedAt) meta.value = res
@@ -303,7 +308,7 @@ onBeforeUnmount(stopPoll)
             <td>
               <span v-for="(s, i) in (r.signals || [])" :key="i" class="tag">{{ s }}</span>
             </td>
-            <td v-for="c in strategyCols[view]" :key="c.key">{{ c.fmt(r.metrics[c.key]) }}</td>
+            <td v-for="c in strategyCols[view]" :key="c.key">{{ c.fmt(metricVal(r, c.key)) }}</td>
           </tr>
         </tbody>
       </table>

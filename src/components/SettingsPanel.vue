@@ -67,7 +67,7 @@ async function onRun() {
   show('', '')
   try {
     const r = await triggerMonitor()
-    status.value = r.status
+    await load()
     show('ok', `扫描完成，共 ${r.status.totalListings} 条记录`)
   } catch (e) {
     show('err', '扫描失败：' + e.message)

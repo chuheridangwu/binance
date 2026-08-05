@@ -85,7 +85,7 @@ async function upsertListing({ code, symbol, title, date, market, source }) {
 async function scanAnnouncements() {
   try {
     const known = new Set(db.prepare('SELECT code FROM listings').all().map((r) => r.code))
-    const list = await fetchListingAnnouncements(20, known)
+    const { list } = await fetchListingAnnouncements(100, known)
     for (const a of list) {
       await upsertListing({ code: a.code, symbol: a.symbol, title: a.title, date: a.date, market: 'announce', source: 'announcement' })
       if (isSameDay(a.date, Date.now())) await notify({ code: a.code, symbol: a.symbol, title: a.title, date: a.date })
@@ -182,7 +182,21 @@ export function startMonitor(intervalMs = 60_000) {
   const iv = Math.max(intervalMs, 10_000)
   setInterval(runOnce, iv)
   runOnce()
+  bootstrapAnnouncements().catch(() => {})
   return () => clearInterval(iv)
+}
+
+// 一次性全量补全公告历史（不受 known 提前截断影响），只跑一次。
+// 之后监控的增量扫描走 known 提前停止，不会重复拉全量页。
+async function bootstrapAnnouncements() {
+  if (getSetting('announce_backfill_done') === '1') return
+  const { list, completed } = await fetchListingAnnouncements(100)
+  if (!completed || !list.length) return
+  for (const a of list) {
+    await upsertListing({ code: a.code, symbol: a.symbol, title: a.title, date: a.date, market: 'announce', source: 'announcement' })
+  }
+  setSetting('announce_backfill_done', '1')
+  console.log(`[monitor] 公告历史补全完成，共 ${list.length} 条`)
 }
 
 export { getSetting, setSetting }

@@ -63,6 +63,15 @@
 - 前端：`ScreenerPanel.vue` 增加月份选择器（`<input type="month">`）+ 清空按钮 + 「上架」列；`startScreener(rules, mode, month)` 传参。月份校验正则 `^\d{4}-\d{2}$`。
 - 月份边界按服务器时区（Docker=UTC）计算，月底最后 1 小时上架可能 ±1 月。
 
+### 月度上新全量历史
+- **修复历史 bug**：20db6fb 把公告抓取从 2 年改成 4 年时，把 while 里的 `twoYearsAgo` 改成了 `fourYearsAgo`，但最后 `.filter(a => a.date >= twoYearsAgo)` 里的 `twoYearsAgo` 忘了改——一直是未定义变量，导致每次 `fetchListingAnnouncements` 都抛 ReferenceError、公告扫描持续失败。已删除该日期过滤。
+- `fetchListingAnnouncements` 现在**返回 `{ list, completed }`**（不再返回数组），所有调用方都要取 `.list`：
+  - 去掉 `fourYearsAgo` 提前 break，翻到目录自然尽头（`articles` 空=完成）。
+  - `known` 提前停止仍保留：整页公告都已入库即停，增量扫描不会重复拉全量页。
+- **一次性全量补全**：`monitor.bootstrapAnnouncements()` 启动时跑一次（不带 known，全量翻 ~62 页），完成后写 `announce_backfill_done=1`；**只有 `completed && list.length>0` 才写标记**，抓取失败不标记、下次启动重试。之后增量扫描走 known 提前停止。
+- `/api/listings` 不再有 47 个月截断：从库中最早月份一直生成到当前月（当前约 110 个月，2017-07 起）。前端标题/汇总从「近 4 年/四年总上币」改为「全量/累计上币」。
+- 注意：目录 total 约 1200+ 篇（约 62 页，20/页），含现货/合约/杠杆等公告；`parseListedSymbol` 只认标题末尾 `(XXX)`，非上新标题（margin 增容等）被 `isNewListing` 过滤。
+
 ### 全量币种搜索（含下架）
 - `getAllSymbols()`（新增）：扫描 现货+合约 exchangeInfo 全部状态（含 `BREAK`/下架）的 USDT 交易对，返回 `[{symbol, active}]`，内存缓存 30 分钟；现货/合约同名优先取 `active=true`。
 - `searchSymbols(keyword)`：改为返回对象数组，**active 在前、已下架排后**，组内按符号排序，截 30 条。

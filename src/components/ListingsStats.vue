@@ -171,8 +171,8 @@ watch(
 <template>
   <div class="stats">
     <div class="head">
-      <h2>币安近 4 年每月上新统计（合约）</h2>
-      <span class="note">共 {{ total }} 个（U本位永续，服务器已预计算）</span>
+      <h2>币安每月上新统计</h2>
+      <span class="note">共 {{ total }} 个（服务器已预计算）</span>
       <span v-if="generatedAt" class="note right">数据更新：{{ new Date(generatedAt).toLocaleString('zh-CN') }}</span>
     </div>
 
@@ -183,7 +183,7 @@ watch(
     <div v-else-if="error" class="hint err">{{ error }}</div>
     <div v-else class="content">
       <div class="cards">
-        <div class="card"><div class="num">{{ summary.total }}</div><div class="label">四年总上币</div></div>
+        <div class="card"><div class="num">{{ summary.total }}</div><div class="label">累计上币</div></div>
         <div class="card"><div class="num">{{ summary.thisYear }}</div><div class="label">{{ thisYearKey }} 年上币</div></div>
         <div class="card"><div class="num">{{ summary.thisMonth }}</div><div class="label">本月上币</div></div>
         <div class="card"><div class="num">{{ summary.last30 }}</div><div class="label">近 30 天上币</div></div>

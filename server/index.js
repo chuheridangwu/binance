@@ -113,10 +113,7 @@ app.post('/api/screener', async (req, res) => {
 
 app.get('/api/listings', (_req, res) => {
   const now = new Date()
-  const cutoff = new Date(now.getFullYear(), now.getMonth() - 47, 1).getTime()
-  const rows = db
-    .prepare('SELECT symbol, date FROM listings WHERE date >= ? ORDER BY date ASC')
-    .all(cutoff)
+  const rows = db.prepare('SELECT symbol, date FROM listings ORDER BY date ASC').all()
   const map = new Map()
   for (const r of rows) {
     const d = new Date(r.date)
@@ -124,11 +121,21 @@ app.get('/api/listings', (_req, res) => {
     if (!map.has(key)) map.set(key, [])
     map.get(key).push({ symbol: r.symbol, date: new Date(r.date).toISOString() })
   }
+  const keys = [...map.keys()].sort()
   const months = []
-  for (let i = 47; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    months.push({ key, label: `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}`, items: map.get(key) || [] })
+  if (keys.length) {
+    let [y, m] = keys[0].split('-').map(Number)
+    const nowY = now.getFullYear()
+    const nowM = now.getMonth() + 1
+    while (y < nowY || (y === nowY && m <= nowM)) {
+      const key = `${y}-${String(m).padStart(2, '0')}`
+      months.push({ key, label: `${y}/${String(m).padStart(2, '0')}`, items: map.get(key) || [] })
+      m++
+      if (m > 12) {
+        m = 1
+        y++
+      }
+    }
   }
   res.json({ total: rows.length, months, generatedAt: Date.now() })
 })

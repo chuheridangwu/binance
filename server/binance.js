@@ -255,18 +255,20 @@ function parseListedSymbol(title) {
 }
 
 export async function fetchListingAnnouncements(maxPages = 40, known = new Set()) {
-  const fourYearsAgo = Date.now() - 4 * 366 * 24 * 3600 * 1000
   const seen = new Map()
   let page = 1
   let consecutiveFailures = 0
+  let completed = false
 
   while (page <= maxPages) {
     const params = new URLSearchParams({ catalogId: '48', type: '1', pageNo: String(page), pageSize: '20' })
     try {
       const res = await getJson(`${ANNOUNCE}?${params}`)
       const articles = res.data?.catalog?.articles || res.data?.articles || []
-      if (!articles.length) break
-      if (new Date(articles[0].releaseDate).getTime() < fourYearsAgo) break
+      if (!articles.length) {
+        completed = true
+        break
+      }
       for (const a of articles) {
         if (!seen.has(a.code)) seen.set(a.code, a)
       }
@@ -280,8 +282,9 @@ export async function fetchListingAnnouncements(maxPages = 40, known = new Set()
       page++
     }
   }
+  if (!completed && page > maxPages) completed = true
 
-  return Array.from(seen.values())
+  const list = Array.from(seen.values())
     .map((a) => {
       const title = String(a.title || '').replace(/<[^>]+>/g, '')
       return {
@@ -292,5 +295,7 @@ export async function fetchListingAnnouncements(maxPages = 40, known = new Set()
         isNewListing: /List|上线|上架/i.test(title),
       }
     })
-    .filter((a) => a.isNewListing && a.symbol && a.date >= twoYearsAgo)
+    .filter((a) => a.isNewListing && a.symbol)
+
+  return { list, completed }
 }

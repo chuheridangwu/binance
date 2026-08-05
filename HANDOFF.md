@@ -76,7 +76,9 @@
 - `/api/listings` 每项附加 `kind`（`stock`/`commodity`/`crypto`）与 `delisted`（`true`/`false`/`null`=symbols 表为空时未知）：
   - `classifyKind`（`server/binance.js`，供 `/api/listings` 与 `/api/search` 共用）优先级：**公告标题关键词**（`Tokenized Stock`/`股票代币`/`股票` → stock；`Tokenized Commodity`/`商品代币`/`原油`/`黄金` → commodity）→ **已知符号集合兜底**（`STOCK_SYMBOLS`/`COMMODITY_SYMBOLS`，覆盖不在 exchangeInfo 的代币与标题不含"股票"的股票永续）→ **symbols 表 `underlying` 字段**（futures exchangeInfo 的 `underlyingType`）。注意：Binance 官方枚举是 `COIN|INDEX`，股票永续多为 `INDEX`（公告原文 "Underlying Index/Equity"），所以 `STOCK`/`INDEX` 都算 stock、`COMMODITY` 算 commodity；已知集合放在 underlying 前，避免 `INDEX` 歧义把商品（如 XAGUSDT）误判成股票。
   - `symbols` 表新增 `underlying` 列（含 ALTER 迁移）：拉 exchangeInfo 时存 `s.underlyingType`（futures 才有，spot 为 ''）。**这是 2026 股票永续（AAPLUSDT/QQQUSDT/SPYUSDT/TSMUSDT/GIGADEVUSDT/XAGUSDT 等）识别的关键**——它们由行情反推插入、标题是通用的「Binance Futures 新上合约：XXX」，靠标题识别不到。GIGADEVUSDT（兆易创新 HK3986，2026-08-03 上市）已加入 `STOCK_SYMBOLS`。
-  - `isDelisted`：用 `symbols` 表 active 集合判定，兼容 base 符号（ARB→查 ARBUSDT）与完整对（BTCUSDT→直接查）。AAPLUSDT 是活跃永续 → 不会误标已下架。
+  - `isDelisted(symbol, activeSyms, kind)`：用 `symbols` 表 active 集合判定，兼容 base 符号（ARB→查 ARBUSDT）与完整对（BTCUSDT→直接查）。**base 形态的股票/商品代币恒判已下架**——它们是 2021 BUSD 计价产品，与同名 2026 USDT 永续（AAPLUSDT）是不同产品，不能因后者活跃而误判。
+  - `parseListedSymbol` 修复：去掉 `\s*$` 锚点，`Binance Will List Apple (AAPL) Tokenized Stock...` 现正确解析为 `AAPL`（此前误解析成 `A`）。
+  - `STOCK_SYMBOLS` 补充活跃股票永续：`TQQQ`（3x QQQ）、`XLE`（能源板块 ETF）。已知局限：`underlyingType='INDEX'` 有歧义（股票指数 vs 商品），靠已知集合优先兜底；新上股票永续若不在集合且 exchangeInfo 未及时刷新，会短暂显示 crypto 直到 30 分钟刷新。
 - 前端：`ListingsStats.vue` tag 加 `股票`/`商品`/`已下架` 徽标 + 图例；`KlineChart.vue` 搜索下拉同样显示这三类徽标。数据来自本地 DB，不新增对外请求。
 
 ### 限流/防制裁与持久化原则

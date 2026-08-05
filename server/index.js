@@ -121,11 +121,12 @@ app.get('/api/listings', (_req, res) => {
     const d = new Date(r.date)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     if (!map.has(key)) map.set(key, [])
+    const kind = binance.classifyKind(r.symbol, r.title, underlying.get(String(r.symbol).toUpperCase()))
     map.get(key).push({
       symbol: r.symbol,
       date: new Date(r.date).toISOString(),
-      kind: binance.classifyKind(r.symbol, r.title, underlying.get(String(r.symbol).toUpperCase())),
-      delisted: isDelisted(r.symbol, activeSyms),
+      kind,
+      delisted: isDelisted(r.symbol, activeSyms, kind),
     })
   }
   const keys = [...map.keys()].sort()
@@ -149,11 +150,15 @@ app.get('/api/listings', (_req, res) => {
 
 // 已下架判定：当前币安 USDT 现货/合约里都不在交易即为已下架
 // 公告行符号多为 base（ARB），行情反推行符号为完整对（BTCUSDT），两种都兼容
-function isDelisted(symbol, activeSyms) {
+function isDelisted(symbol, activeSyms, kind) {
   if (!activeSyms.size) return null
   const s = String(symbol).toUpperCase()
-  const cands = s.endsWith('USDT') ? [s] : [s, s + 'USDT']
-  return !cands.some((c) => activeSyms.has(c))
+  const full = s.endsWith('USDT') ? s : s + 'USDT'
+  const active = activeSyms.has(s) || activeSyms.has(full)
+  // base 形态的股票/商品代币是 2021 年 BUSD 计价产品（早已下架），
+  // 与同名 2026 USDT 永续（AAPLUSDT 等）是不同产品，不能因后者活跃而判为未下架
+  if (!s.endsWith('USDT') && (kind === 'stock' || kind === 'commodity')) return true
+  return !active
 }
 
 app.get('/api/status', (_req, res) => {

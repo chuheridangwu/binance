@@ -259,7 +259,7 @@ const COMMODITY_RE = /tokenized commodity|commodity token|商品代币|原油|�
 // 也覆盖 2026 股票永续（AAPLUSDT/QQQUSDT/GIGADEVUSDT 等，标题不含"股票"关键词）
 const STOCK_SYMBOLS = new Set([
   'AAPL', 'TSLA', 'COIN', 'MSTR', 'MSFT', 'BABA', 'SQ', 'AMZN', 'GOOG', 'NIO',
-  'GME', 'AMC', 'PFE', 'BAC', 'BILI', 'QQQ', 'SPY', 'TSM', 'GIGADEV',
+  'GME', 'AMC', 'PFE', 'BAC', 'BILI', 'QQQ', 'SPY', 'TSM', 'GIGADEV', 'TQQQ', 'XLE',
   'AB', 'ARLP', 'GLP', 'ET',
 ])
 const COMMODITY_SYMBOLS = new Set(['OIL', 'BRENT', 'GOLD', 'XAG', 'XAU', 'SLV', 'GLD', 'USO', 'COPPER'])
@@ -292,7 +292,7 @@ export function buildUnderlyingMap() {
 }
 
 function parseListedSymbol(title) {
-  const m = title.match(/\(([A-Z0-9]{1,12})\)\s*$/)
+  const m = title.match(/\(([A-Z0-9]{1,12})\)/)
   if (m) return m[1]
   const m2 = title.match(/Will List ([A-Z0-9]+)/)
   return m2 ? m2[1] : null

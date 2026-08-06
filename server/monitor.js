@@ -21,8 +21,8 @@ const MAX_NOTIFY_ATTEMPTS = 10
 const NOTIFY_ATTEMPT_INTERVAL_MS = 30 * 60 * 1000
 const NOTIFY_RETRY_WINDOW_MS = 2 * 24 * 60 * 60 * 1000
 
-// 定时扫描：北京时间 00:01 / 04:01 / 12:01 / 16:01 / 20:01 各跑一次默认规则扫描
-const SCHEDULED_SLOTS = ['00:01', '04:01', '12:01', '16:01', '20:01']
+// 定时扫描：北京时间 00:01 / 04:01 / 08:01 / 12:01 / 16:01 / 20:01 各跑一次默认规则扫描
+const SCHEDULED_SLOTS = ['00:01', '04:01', '08:01', '12:01', '16:01', '20:01']
 const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000
 
 function beijingClock() {

@@ -57,6 +57,7 @@
 - **不追踪标记（mute）**：`server/db.js` 新增 `muted_symbols` 表（symbol 主键 + created_at）；`server/screener.js` 新增 `MUTE_TTL_MS`（7 天）、`getMuteMap/listMutes/addMute/removeMute`；`scan()` 给每行附加 `muted/mutedAt`，排序时**不追踪的排最下面**（组内仍按命中数+RSI6）；`monitor.js` 定时邮件用 `r.muted` 显示 🚫 且自然排在下方（继承 scan 排序）。`server/index.js` 新增 `GET/POST /api/mute`、`DELETE /api/mute/:symbol`。前端：命中行加「不追踪」按钮 → 打标后该行 🚫 徽标+整行降透明度+下沉到底部，一周内有效，点击 🚫 可取消；`src/api/monitor.js` 新增 `fetchMutes/addMute/removeMute`。
 - **定时扫描槽位**：`SCHEDULED_SLOTS = ['00:01','04:01','08:01','12:01','16:01','20:01']`（北京时间）。
 - **公告上新解析（合约优先）**：`binance.js` 新增 `isNewListingTitle()` + 增强 `parseListedSymbol()`。之前只认 `List/上线/上架`（只抓现货 Will List 公告），**期货合约公告 "Will Launch USDⓈ-M XXX Perpetual" 被丢弃**，导致「只上合约、没上现货」的币月度统计里永远缺失。现在：`Will Launch ... Perpetual`（排除 Quarterly/Delivery/Options 季度交割与期权）、`Will Open Trading` 也都算上新；`parseListedSymbol` 从 `Will Launch USDⓈ-M XXX Perpetual` / `Will Launch XXX 1-75x USDT perpetual` 中提取合约符号。补充路径 `scanMarketDiff` 仍兜底捕获新 USDT-M 永续（symbols 表 30 分钟刷新 + 首根 K 线时间当上架日）。
+- **趋势策略也支持追踪/不追踪 + 上架时间**：`scanStrategies()`（上涨/下跌/山顶/山底）每行已带 `listed`（上架月份）、`price`、新增顶层 `rsi6`；并像规则扫描一样附加 `muted/mutedAt`，排序改为「muted 置底 → 评分降序」。前端策略表格新增「上架」列和「操作」列（追踪 / 不追踪按钮、🚫 徽标、row-muted 变淡）；`sortRows()` 按 view 区分：rules 用命中数+RSI6，策略用评分。
 
 功能完整可用，已合入 main 并推送。新增：新币/套利**邮件通知失败自动重试**（见下）。
 

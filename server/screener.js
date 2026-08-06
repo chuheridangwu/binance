@@ -414,6 +414,7 @@ export async function scanStrategies(strategies, opts = {}) {
           symbol: sym,
           listed: listed ? monthKey(listed) : '',
           price: f.price,
+          rsi6: Number.isFinite(f.rsi6) ? f.rsi6 : null,
           metrics: {},
           signals: [],
           strategy: [],
@@ -461,6 +462,15 @@ export async function scanStrategies(strategies, opts = {}) {
     })
 
     results.sort((a, b) => (b.score || 0) - (a.score || 0))
+    const muted = getMuteMap()
+    results.forEach((r) => {
+      r.muted = muted.has(r.symbol)
+      r.mutedAt = muted.get(r.symbol) ?? null
+    })
+    results.sort((a, b) => {
+      if (!!a.muted !== !!b.muted) return a.muted ? 1 : -1
+      return (b.score || 0) - (a.score || 0)
+    })
     lastResults = {
       mode: 'strategies',
       strategies: [...want],

@@ -4,11 +4,13 @@ import { sendMail } from './mailer.js'
 import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 import { checkTrackers } from './trackers.js'
 import * as screener from './screener.js'
+import { enrichCoinInfos } from './coingecko.js'
 
 const state = {
   lastCheck: 0,
   lastAnnouncementScan: 0,
   lastSpreadScan: 0,
+  lastCoinEnrich: 0,
   lastEmailAt: 0,
   lastEmailTo: [],
   totalListings: 0,
@@ -234,6 +236,15 @@ export async function runOnce() {
     }
     await checkTrackers()
     await scanScheduledDefault()
+    if (Date.now() - state.lastCoinEnrich > 60 * 60 * 1000) {
+      try {
+        const n = await enrichCoinInfos({ limit: 40 })
+        if (n) console.log(`[monitor] CoinGecko 预取 ${n} 个币信息`)
+      } catch {
+        // 免费接口限流/超时不影响主流程
+      }
+      state.lastCoinEnrich = Date.now()
+    }
   } finally {
     state.lastCheck = Date.now()
     state.running = false

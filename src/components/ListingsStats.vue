@@ -15,12 +15,17 @@ const coinModal = ref(null)
 const coinLoading = ref(false)
 const coinError = ref('')
 
-function openCoinInfo(sym) {
+function openCoinInfo(it) {
   if (coinLoading.value) return
+  if (it.coinInfo) {
+    coinError.value = ''
+    coinModal.value = it.coinInfo
+    return
+  }
   coinError.value = ''
   coinModal.value = null
   coinLoading.value = true
-  fetchCoinInfo(sym)
+  fetchCoinInfo(it.symbol)
     .then((info) => {
       coinModal.value = info
     })
@@ -271,7 +276,7 @@ watch(
                 <i v-else-if="it.kind === 'commodity'" class="badge commodity">商品</i>
                 <i v-if="it.delisted" class="badge delisted">已下架</i>
                 <small>{{ String(it.date).slice(0, 10) }}</small>
-                <button class="tag-info" title="查看币信息" @click.stop="openCoinInfo(it.symbol)">详情</button>
+                <button class="tag-info" title="查看币信息" @click.stop="openCoinInfo(it)">详情</button>
               </span>
             </div>
           </div>

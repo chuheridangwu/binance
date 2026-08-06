@@ -10,7 +10,7 @@ import * as auth from './auth.js'
 import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 import * as screener from './screener.js'
 import { listTrackers, createTracker, deleteTracker } from './trackers.js'
-import { getCoinInfo } from './coingecko.js'
+import { getCoinInfo, getCachedCoinInfo } from './coingecko.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -172,6 +172,11 @@ app.get('/api/listings', (_req, res) => {
   const rows = db.prepare('SELECT symbol, date, title, source FROM listings ORDER BY date ASC').all()
   const activeSyms = new Set(db.prepare('SELECT symbol FROM symbols WHERE active = 1').all().map((r) => r.symbol))
   const underlying = binance.buildUnderlyingMap()
+  const coinInfoCache = new Map()
+  const coinInfoFor = (base) => {
+    if (!coinInfoCache.has(base)) coinInfoCache.set(base, getCachedCoinInfo(base))
+    return coinInfoCache.get(base)
+  }
   // 同月内同一标的去重：公告行（base 符号、真标题）优先于行情反推行（完整对、泛标题），
   // 避免同一个合约被两条入库路径重复计数（历史数据里已存在重复行）
   const seen = new Map()
@@ -187,6 +192,7 @@ app.get('/api/listings', (_req, res) => {
       source: r.source,
       kind,
       delisted: isDelisted(r.symbol, activeSyms, kind),
+      coinInfo: coinInfoFor(base),
     }
     const pk = `${key}|${base}`
     const existing = seen.get(pk)

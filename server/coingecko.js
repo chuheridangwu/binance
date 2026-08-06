@@ -87,6 +87,36 @@ async function searchCoinId(sym) {
   return pick.id
 }
 
+// 只读库里的新鲜缓存（不触发网络请求），用于列表接口直接带出已存数据
+export function getCachedCoinInfo(symbol) {
+  const base = baseSymbol(symbol)
+  const cached = db.prepare('SELECT data, fetched_at FROM cg_cache WHERE symbol = ?').get(base)
+  if (cached?.data && Date.now() - (cached.fetched_at || 0) < CACHE_TTL_MS) {
+    return JSON.parse(cached.data)
+  }
+  return null
+}
+
+// 后台预取：把最近 N 个月上新的币信息自动拉取并存库，前端有缓存直接用、不再逐个现查
+export async function enrichCoinInfos({ limit = 30, months = 6 } = {}) {
+  const cutoff = new Date()
+  cutoff.setMonth(cutoff.getMonth() - months)
+  const rows = db.prepare('SELECT DISTINCT symbol FROM listings WHERE date >= ?').all(cutoff.getTime())
+  const bases = [...new Set(rows.map((r) => baseSymbol(r.symbol)))]
+  let done = 0
+  for (const base of bases) {
+    if (done >= limit) break
+    if (getCachedCoinInfo(base)) continue
+    try {
+      await getCoinInfo(base)
+      done++
+    } catch {
+      // 单个币失败不影响后续
+    }
+  }
+  return done
+}
+
 export async function getCoinInfo(symbol) {
   const base = baseSymbol(symbol)
   const cached = db.prepare('SELECT data, fetched_at FROM cg_cache WHERE symbol = ?').get(base)

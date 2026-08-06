@@ -344,11 +344,22 @@ export function buildUnderlyingMap() {
   return map
 }
 
+// 判断标题是否为"上新"公告：现货 Will List/上线/上架，或永续合约 Will Launch ... Perpetual。
+// 排除季度交割（Quarterly/Delivery）和期权（Options），它们不算新币/新合约上架。
+function isNewListingTitle(title) {
+  if (/List|Will Open Trading|上线|上架/i.test(title)) return true
+  return /Launch/i.test(title) && /Perpetual/i.test(title) && !/Quarterly|Delivery|Options/i.test(title)
+}
+
 function parseListedSymbol(title) {
   const m = title.match(/\(([A-Z0-9]{1,12})\)/)
   if (m) return m[1]
   const m2 = title.match(/Will List ([A-Z0-9]+)/)
-  return m2 ? m2[1] : null
+  if (m2) return m2[1]
+  // 合约上新：Will Launch USDⓈ-M SEI Perpetual / Will Launch XAUT 1-50x USDT perpetual
+  const m3 = title.match(/Will Launch (?:USD[ⓈS]-?M\s*)?([A-Z0-9]{1,12})/i)
+  if (m3 && /Perpetual/i.test(title) && !/Quarterly|Delivery|Options/i.test(title)) return m3[1]
+  return null
 }
 
 export async function fetchListingAnnouncements(maxPages = 40, known = new Set()) {
@@ -391,7 +402,7 @@ export async function fetchListingAnnouncements(maxPages = 40, known = new Set()
         title,
         symbol: parseListedSymbol(title),
         date: new Date(a.releaseDate).getTime(),
-        isNewListing: /List|上线|上架/i.test(title),
+        isNewListing: isNewListingTitle(title),
       }
     })
     .filter((a) => a.isNewListing && a.symbol)

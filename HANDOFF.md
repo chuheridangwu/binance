@@ -55,6 +55,8 @@
   - `checkTrackers()` 挂在 `monitor.runOnce()` 里（每分钟随监控跑一次）。
 - **定时默认扫描**：`monitor.js` 的 `scanScheduledDefault()` 按**北京时间（UTC+8）**在 `00:01/04:01/12:01/16:01/20:01` 各跑一次「全部规则+默认参数+any」扫描，有命中则发一封汇总邮件；用 settings key `sched_scan_日期_时:分` 防重复，扫描失败清空 key 允许重试。挂在 `runOnce()` 末尾。
 - **不追踪标记（mute）**：`server/db.js` 新增 `muted_symbols` 表（symbol 主键 + created_at）；`server/screener.js` 新增 `MUTE_TTL_MS`（7 天）、`getMuteMap/listMutes/addMute/removeMute`；`scan()` 给每行附加 `muted/mutedAt`，排序时**不追踪的排最下面**（组内仍按命中数+RSI6）；`monitor.js` 定时邮件用 `r.muted` 显示 🚫 且自然排在下方（继承 scan 排序）。`server/index.js` 新增 `GET/POST /api/mute`、`DELETE /api/mute/:symbol`。前端：命中行加「不追踪」按钮 → 打标后该行 🚫 徽标+整行降透明度+下沉到底部，一周内有效，点击 🚫 可取消；`src/api/monitor.js` 新增 `fetchMutes/addMute/removeMute`。
+- **定时扫描槽位**：`SCHEDULED_SLOTS = ['00:01','04:01','08:01','12:01','16:01','20:01']`（北京时间）。
+- **公告上新解析（合约优先）**：`binance.js` 新增 `isNewListingTitle()` + 增强 `parseListedSymbol()`。之前只认 `List/上线/上架`（只抓现货 Will List 公告），**期货合约公告 "Will Launch USDⓈ-M XXX Perpetual" 被丢弃**，导致「只上合约、没上现货」的币月度统计里永远缺失。现在：`Will Launch ... Perpetual`（排除 Quarterly/Delivery/Options 季度交割与期权）、`Will Open Trading` 也都算上新；`parseListedSymbol` 从 `Will Launch USDⓈ-M XXX Perpetual` / `Will Launch XXX 1-75x USDT perpetual` 中提取合约符号。补充路径 `scanMarketDiff` 仍兜底捕获新 USDT-M 永续（symbols 表 30 分钟刷新 + 首根 K 线时间当上架日）。
 
 功能完整可用，已合入 main 并推送。新增：新币/套利**邮件通知失败自动重试**（见下）。
 

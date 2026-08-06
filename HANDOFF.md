@@ -7,6 +7,9 @@
 - 本项目是一个个人自用的**币安监控面板**（Web 应用），位于 `/Users/sky/Desktop/binance`（本机为 mac，仓库远端为 GitHub）。
 - 每次改完代码后 **必须自动推送** 到 GitHub：`git add . && git commit -m "..." && git push origin main`（已与用户约定，无需每次再问）。
 - 服务器部署：服务器上 1Panel 每 1 分钟轮询 GitHub，检测到新提交才 `git pull` + `docker compose up -d --build`。提交后约 1 分钟自动生效。
+- **量化数据地基（2026-08 新增）**：目标是从「监控面板」升级到「量化工具」。数据地基模块 `server/history.js` 把币安 **USDT 永续** 的 K 线与资金费率历史落库到独立 SQLite `data/market.db`（与 app.db 分开），只追加永久保存，区别于 app.db 里 30 天即删的 `kline_cache`/`oi_cache` 覆盖式缓存。范围选择（用户确认）：仅 USDT 永续；K 线周期 `5m/30m/1h/4h/1d/1w/1M` 全量回补；只收集资金费率历史（不要 OI）。表：`klines(symbol,interval,time,open,high,low,close,volume,quote_volume,trades)` PK(symbol,interval,time)、`funding(symbol,time,rate,mark_price)`、`meta`（回补进度，断点续跑）。
+- **数据地基工作方式**：复用 `binance.js` 全局限速器（`getJson`）与 `getPerpetualSymbols`、`getFirstKlineTime`。`startHistory()` 在 `index.js` 启动时调用：先后台 `backfillAll()`（顺序 `1M→1w→1d→4h→1h→30m→5m`，每个币直到追平当前；单币失败跳过继续），再 `setInterval` 增量——5m 每 15 分钟追一次、30m/1h/4h/1d/1w/1M + 资金费率每 60 分钟追一次。进度存在 `meta` 表（key `bf_符号_周期`、`bfF_符号`），重启后从不完整处继续。`GET /api/history/status` 返回进度/各周期行数与最新时间。
+- **容量预估**：仅 USDT 永续约 500 币 × 全量历史，粗估 5m 占大头；SQLite 单文件存数年可接受，明显超预算时可再归档裁剪（只留最近 5m、久远只留 1h/1d）。**本地无法访问币安**，回补只能线上首次触发。
 - **多轮次项目**：目标是「指标选股」功能从零到上线+后续打磨。环境受限（见「卡点」），大量逻辑靠 stub fetch 验证，未做线上实测。
 
 ---

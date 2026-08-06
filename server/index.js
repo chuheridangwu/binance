@@ -11,6 +11,7 @@ import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 import * as screener from './screener.js'
 import { listTrackers, createTracker, deleteTracker } from './trackers.js'
 import { getCoinInfo, getCachedCoinInfo } from './coingecko.js'
+import { getHistoryStatus, startHistory } from './history.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -303,6 +304,10 @@ app.post('/api/monitor/run', async (_req, res) => {
   }
 })
 
+app.get('/api/history/status', (_req, res) => {
+  res.json(getHistoryStatus())
+})
+
 const dist = path.join(__dirname, '..', 'dist')
 if (fs.existsSync(dist)) {
   app.use(express.static(dist))
@@ -313,4 +318,5 @@ const PORT = Number(process.env.PORT || 3000)
 app.listen(PORT, () => {
   console.log(`[server] listening on http://0.0.0.0:${PORT}`)
   monitor.startMonitor()
+  startHistory()
 })

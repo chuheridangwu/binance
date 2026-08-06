@@ -68,6 +68,16 @@ CREATE TABLE IF NOT EXISTS muted_symbols (
   symbol     TEXT PRIMARY KEY,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS cg_search (
+  symbol     TEXT PRIMARY KEY,
+  coin_id    TEXT DEFAULT '',
+  fetched_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS cg_cache (
+  symbol     TEXT PRIMARY KEY,
+  data       TEXT,
+  fetched_at INTEGER
+);
 CREATE INDEX IF NOT EXISTS idx_listings_date ON listings(date);
 CREATE INDEX IF NOT EXISTS idx_kline_cache_lookup ON kline_cache(symbol, interval, fetched_at);
 CREATE INDEX IF NOT EXISTS idx_oi_cache_lookup ON oi_cache(symbol, fetched_at);

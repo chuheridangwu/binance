@@ -58,6 +58,7 @@
 - **定时扫描槽位**：`SCHEDULED_SLOTS = ['00:01','04:01','08:01','12:01','16:01','20:01']`（北京时间）。
 - **公告上新解析（合约优先）**：`binance.js` 新增 `isNewListingTitle()` + 增强 `parseListedSymbol()`。之前只认 `List/上线/上架`（只抓现货 Will List 公告），**期货合约公告 "Will Launch USDⓈ-M XXX Perpetual" 被丢弃**，导致「只上合约、没上现货」的币月度统计里永远缺失。现在：`Will Launch ... Perpetual`（排除 Quarterly/Delivery/Options 季度交割与期权）、`Will Open Trading` 也都算上新；`parseListedSymbol` 从 `Will Launch USDⓈ-M XXX Perpetual` / `Will Launch XXX 1-75x USDT perpetual` 中提取合约符号。补充路径 `scanMarketDiff` 仍兜底捕获新 USDT-M 永续（symbols 表 30 分钟刷新 + 首根 K 线时间当上架日）。
 - **趋势策略也支持追踪/不追踪 + 上架时间**：`scanStrategies()`（上涨/下跌/山顶/山底）每行已带 `listed`（上架月份）、`price`、新增顶层 `rsi6`；并像规则扫描一样附加 `muted/mutedAt`，排序改为「muted 置底 → 评分降序」。前端策略表格新增「上架」列和「操作」列（追踪 / 不追踪按钮、🚫 徽标、row-muted 变淡）；`sortRows()` 按 view 区分：rules 用命中数+RSI6，策略用评分。
+- **币信息（CoinGecko）**：币安 API 不提供币的基础信息，新增 `server/coingecko.js` 接 CoinGecko。`GET /api/coininfo?symbol=ARBUSDT`（`index.js`）→ `baseSymbol()` 归一化（去 USDT 后缀）→ `/search` 找最佳 coin id（精确符号+有市值排名优先，结果存 `cg_search` 7 天）→ `/coins/{id}` 拿全名/流通市值/FDV/流通量/总供应量/最大供应量/ATH(+时间)/ATL(+时间)/上线交易所（tickers 去重）。结果存 `cg_cache` 24h。CoinGecko 需 `x_cg_demo_api_key`：从 settings key `coingecko_api_key` 读（没配则 keyless 共享 IP 限流，仍可用）。免费 Demo 计划 100 次/分钟，内部限速 2 并发 + 600ms 间隔。前端 `ListingsStats.vue` 每个币 tag 加「详情」按钮 → 弹窗展示全部字段。本地网络访问不了 CoinGecko（和币安一样），需线上验证。
 
 功能完整可用，已合入 main 并推送。新增：新币/套利**邮件通知失败自动重试**（见下）。
 

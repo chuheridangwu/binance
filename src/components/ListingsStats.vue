@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { createChart, ColorType } from 'lightweight-charts'
-import { fetchListings } from '../api/monitor'
+import { fetchListings, fetchCoinInfo } from '../api/monitor'
 import { store } from '../store'
 
 const loading = ref(true)
@@ -11,6 +11,62 @@ const months = ref([])
 const generatedAt = ref(null)
 const expanded = ref(null)
 const search = ref('')
+const coinModal = ref(null)
+const coinLoading = ref(false)
+const coinError = ref('')
+
+function openCoinInfo(sym) {
+  if (coinLoading.value) return
+  coinError.value = ''
+  coinModal.value = null
+  coinLoading.value = true
+  fetchCoinInfo(sym)
+    .then((info) => {
+      coinModal.value = info
+    })
+    .catch((e) => {
+      coinError.value = e.message
+    })
+    .finally(() => {
+      coinLoading.value = false
+    })
+}
+
+function fmtUsd(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—'
+  if (v >= 1e12) return '$' + (v / 1e12).toFixed(2) + 'T'
+  if (v >= 1e9) return '$' + (v / 1e9).toFixed(2) + 'B'
+  if (v >= 1e6) return '$' + (v / 1e6).toFixed(2) + 'M'
+  if (v >= 1e3) return '$' + (v / 1e3).toFixed(2) + 'K'
+  return '$' + Number(v).toFixed(2)
+}
+
+function fmtSupply(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—'
+  if (v >= 1e12) return (v / 1e12).toFixed(2) + 'T'
+  if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B'
+  if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M'
+  return Number(v).toFixed(0)
+}
+
+function fmtDate(ts) {
+  if (!ts) return '—'
+  return new Date(ts).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+function coinRows(info) {
+  if (!info || !info.found) return []
+  return [
+    { k: '全名', v: info.name || '—' },
+    { k: '流通市值', v: fmtUsd(info.marketCapUsd) },
+    { k: '完全稀释市值(FDV)', v: fmtUsd(info.fdvUsd) },
+    { k: '流通量', v: fmtSupply(info.circulatingSupply) },
+    { k: '总供应量', v: fmtSupply(info.totalSupply) },
+    { k: '最大供应量', v: fmtSupply(info.maxSupply) },
+    { k: '历史最高(ATH)', v: info.athUsd !== null ? `${fmtUsd(info.athUsd)} @ ${fmtDate(info.athDate)}` : '—' },
+    { k: '历史最低(ATL)', v: info.atlUsd !== null ? `${fmtUsd(info.atlUsd)} @ ${fmtDate(info.atlDate)}` : '—' },
+  ]
+}
 
 const filteredMonths = computed(() => {
   const kw = search.value.trim().toUpperCase()
@@ -215,6 +271,7 @@ watch(
                 <i v-else-if="it.kind === 'commodity'" class="badge commodity">商品</i>
                 <i v-if="it.delisted" class="badge delisted">已下架</i>
                 <small>{{ String(it.date).slice(0, 10) }}</small>
+                <button class="tag-info" title="查看币信息" @click.stop="openCoinInfo(it.symbol)">详情</button>
               </span>
             </div>
           </div>
@@ -243,6 +300,34 @@ watch(
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+
+    <div v-if="coinLoading || coinModal || coinError" class="modal-mask" @click.self="coinModal = null; coinError = ''">
+      <div class="modal">
+        <div v-if="coinLoading" class="modal-hint">查询中…（CoinGecko，首次约需几秒）</div>
+        <div v-else-if="coinError" class="modal-hint err">{{ coinError }}</div>
+        <template v-else-if="coinModal">
+          <div class="modal-head">
+            <h3>{{ coinModal.symbol }} <span class="modal-name">{{ coinModal.name || '未找到' }}</span></h3>
+            <button class="modal-close" @click="coinModal = null">×</button>
+          </div>
+          <div v-if="!coinModal.found" class="modal-hint">CoinGecko 未收录该币，可能已下架或为代币化产品。</div>
+          <table v-else class="coin-tbl">
+            <tbody>
+              <tr v-for="r in coinRows(coinModal)" :key="r.k">
+                <td class="k">{{ r.k }}</td>
+                <td class="v">{{ r.v }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="coinModal.exchanges && coinModal.exchanges.length" class="exch-box">
+            <b>已上线交易所（{{ coinModal.exchanges.length }} 家）</b>
+            <div class="exch-tags">
+              <span v-for="x in coinModal.exchanges" :key="x" class="exch-tag">{{ x }}</span>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
   </div>
@@ -533,4 +618,114 @@ watch(
 .badge.stock { background: #223458; color: #8ab4ff; }
 .badge.commodity { background: #12352c; color: #43e3b4; }
 .badge.delisted { background: #3a1d24; color: #ff7d8c; }
+.tag-info {
+  font-family: inherit;
+  font-size: 10px;
+  background: transparent;
+  border: 1px solid #2b3139;
+  color: #848e9c;
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 2px;
+  cursor: pointer;
+}
+.tag-info:hover {
+  color: #f0b90b;
+  border-color: #f0b90b;
+}
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: #101417;
+  border: 1px solid #2b3139;
+  border-radius: 10px;
+  padding: 20px;
+  width: 480px;
+  max-width: calc(100vw - 40px);
+  max-height: 80vh;
+  overflow: auto;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.modal-head h3 {
+  margin: 0;
+  color: #eaecef;
+  font-size: 18px;
+}
+.modal-name {
+  color: #848e9c;
+  font-size: 14px;
+  font-weight: normal;
+}
+.modal-close {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: #848e9c;
+  font-size: 22px;
+  cursor: pointer;
+  line-height: 1;
+}
+.modal-close:hover {
+  color: #eaecef;
+}
+.modal-hint {
+  color: #848e9c;
+  font-size: 13px;
+  padding: 10px 0;
+}
+.modal-hint.err {
+  color: #f6465d;
+}
+.coin-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.coin-tbl td {
+  padding: 7px 8px;
+  border-bottom: 1px solid #1e2329;
+}
+.coin-tbl .k {
+  color: #848e9c;
+  width: 42%;
+}
+.coin-tbl .v {
+  color: #eaecef;
+  text-align: right;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+}
+.exch-box {
+  margin-top: 14px;
+}
+.exch-box b {
+  color: #eaecef;
+  font-size: 13px;
+}
+.exch-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+.exch-tag {
+  background: #1e2329;
+  border: 1px solid #2b3139;
+  color: #848e9c;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
 </style>

@@ -10,6 +10,7 @@ import * as auth from './auth.js'
 import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 import * as screener from './screener.js'
 import { listTrackers, createTracker, deleteTracker } from './trackers.js'
+import { getCoinInfo } from './coingecko.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -220,6 +221,17 @@ app.get('/api/listings', (_req, res) => {
     }
   }
   res.json({ total: rows.length, months, generatedAt: Date.now() })
+})
+
+app.get('/api/coininfo', async (req, res) => {
+  const symbol = String(req.query.symbol || '').toUpperCase()
+  if (!symbol) return res.status(400).json({ error: 'symbol 必填' })
+  try {
+    const info = await getCoinInfo(symbol)
+    res.json(info)
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
 })
 
 // 已下架判定：当前币安 USDT 现货/合约里都不在交易即为已下架

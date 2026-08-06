@@ -28,6 +28,10 @@ export function fetchListings() {
   return api('/api/listings')
 }
 
+export function fetchCoinInfo(symbol) {
+  return api(`/api/coininfo?symbol=${encodeURIComponent(symbol)}`)
+}
+
 export function fetchStatus() {
   return api('/api/status')
 }

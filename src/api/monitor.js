@@ -29,7 +29,11 @@ export function fetchListings() {
 }
 
 export function fetchCoinInfo(symbol) {
-  return api(`/api/coininfo?symbol=${encodeURIComponent(symbol)}`)
+  return api('/api/coininfo?symbol=' + encodeURIComponent(symbol))
+}
+
+export function fetchCoinInfoSearch(symbol) {
+  return api('/api/coininfo/search?symbol=' + encodeURIComponent(symbol))
 }
 
 export function fetchStatus() {

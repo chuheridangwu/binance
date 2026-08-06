@@ -10,7 +10,7 @@ import * as auth from './auth.js'
 import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 import * as screener from './screener.js'
 import { listTrackers, createTracker, deleteTracker } from './trackers.js'
-import { getCoinInfo, getCachedCoinInfo } from './coingecko.js'
+import { getCoinInfo, getCachedCoinInfo, searchCoinInfo } from './coingecko.js'
 import { getHistoryStatus, startHistory } from './history.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -237,6 +237,17 @@ app.get('/api/coininfo', async (req, res) => {
   try {
     const info = await getCoinInfo(symbol)
     res.json(info)
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
+})
+
+app.get('/api/coininfo/search', async (req, res) => {
+  const symbol = String(req.query.symbol || '').toUpperCase()
+  if (!symbol) return res.status(400).json({ error: 'symbol 必填' })
+  try {
+    const result = await searchCoinInfo(symbol)
+    res.json(result)
   } catch (e) {
     res.status(502).json({ error: e.message })
   }

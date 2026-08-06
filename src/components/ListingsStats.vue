@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { createChart, ColorType } from 'lightweight-charts'
-import { fetchListings, fetchCoinInfo } from '../api/monitor'
+import { fetchListings, fetchCoinInfo, fetchCoinInfoSearch } from '../api/monitor'
 import { store } from '../store'
 
 const loading = ref(true)
@@ -14,27 +14,33 @@ const search = ref('')
 const coinModal = ref(null)
 const coinLoading = ref(false)
 const coinError = ref('')
+const coinSearch = ref(null)
+const coinSearchLoading = ref(false)
 
 function openCoinInfo(it) {
   if (coinLoading.value) return
   if (it.coinInfo) {
     coinError.value = ''
     coinModal.value = it.coinInfo
+    coinSearch.value = null
+    coinSearchLoading.value = false
+    fetchCoinInfoSearch(it.symbol)
+      .then((r) => { coinSearch.value = r })
+      .catch(() => {})
     return
   }
   coinError.value = ''
   coinModal.value = null
   coinLoading.value = true
+  coinSearch.value = null
+  coinSearchLoading.value = true
   fetchCoinInfo(it.symbol)
     .then((info) => {
       coinModal.value = info
+      return fetchCoinInfoSearch(it.symbol).then((r) => { coinSearch.value = r }).catch(() => {})
     })
-    .catch((e) => {
-      coinError.value = e.message
-    })
-    .finally(() => {
-      coinLoading.value = false
-    })
+    .catch((e) => { coinError.value = e.message })
+    .finally(() => { coinLoading.value = false; coinSearchLoading.value = false })
 }
 
 function fmtUsd(v) {
@@ -61,8 +67,9 @@ function fmtDate(ts) {
 
 function coinRows(info) {
   if (!info || !info.found) return []
-  return [
+  const rows = [
     { k: '全名', v: info.name || '—' },
+    { k: '分类', v: info.categories?.length ? info.categories.join(', ') : '—' },
     { k: '流通市值', v: fmtUsd(info.marketCapUsd) },
     { k: '完全稀释市值(FDV)', v: fmtUsd(info.fdvUsd) },
     { k: '流通量', v: fmtSupply(info.circulatingSupply) },
@@ -71,6 +78,7 @@ function coinRows(info) {
     { k: '历史最高(ATH)', v: info.athUsd !== null ? `${fmtUsd(info.athUsd)} @ ${fmtDate(info.athDate)}` : '—' },
     { k: '历史最低(ATL)', v: info.atlUsd !== null ? `${fmtUsd(info.atlUsd)} @ ${fmtDate(info.atlDate)}` : '—' },
   ]
+  return rows
 }
 
 const filteredMonths = computed(() => {
@@ -308,30 +316,100 @@ watch(
       </div>
     </div>
 
-    <div v-if="coinLoading || coinModal || coinError" class="modal-mask" @click.self="coinModal = null; coinError = ''">
-      <div class="modal">
-        <div v-if="coinLoading" class="modal-hint">查询中…（CoinGecko，首次约需几秒）</div>
+    <div v-if="coinLoading || coinModal || coinError" class="modal-mask" @click.self="coinModal = null; coinError = ''; coinSearch = null">
+      <div class="modal coin-modal">
+        <div v-if="coinLoading" class="modal-hint">查询中…（CoinGecko + 百科搜索，首次约需几秒）</div>
         <div v-else-if="coinError" class="modal-hint err">{{ coinError }}</div>
         <template v-else-if="coinModal">
           <div class="modal-head">
             <h3>{{ coinModal.symbol }} <span class="modal-name">{{ coinModal.name || '未找到' }}</span></h3>
-            <button class="modal-close" @click="coinModal = null">×</button>
+            <button class="modal-close" @click="coinModal = null; coinSearch = null">×</button>
           </div>
           <div v-if="!coinModal.found" class="modal-hint">CoinGecko 未收录该币，可能已下架或为代币化产品。</div>
-          <table v-else class="coin-tbl">
-            <tbody>
-              <tr v-for="r in coinRows(coinModal)" :key="r.k">
-                <td class="k">{{ r.k }}</td>
-                <td class="v">{{ r.v }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-if="coinModal.exchanges && coinModal.exchanges.length" class="exch-box">
-            <b>已上线交易所（{{ coinModal.exchanges.length }} 家）</b>
-            <div class="exch-tags">
-              <span v-for="x in coinModal.exchanges" :key="x" class="exch-tag">{{ x }}</span>
+          <template v-else>
+            <table class="coin-tbl">
+              <tbody>
+                <tr v-for="r in coinRows(coinModal)" :key="r.k">
+                  <td class="k">{{ r.k }}</td>
+                  <td class="v">{{ r.v }}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <details v-if="coinModal.description" class="coin-detail">
+              <summary>项目简介</summary>
+              <p class="desc-text">{{ coinModal.description }}</p>
+            </details>
+
+            <details v-if="coinModal.platforms && Object.keys(coinModal.platforms).length" class="coin-detail">
+              <summary>合约地址</summary>
+              <div v-for="(addr, chain) in coinModal.platforms" :key="chain" class="plat-row">
+                <span class="plat-name">{{ chain }}</span>
+                <code class="plat-addr">{{ addr }}</code>
+              </div>
+            </details>
+
+            <details v-if="coinModal.links" class="coin-detail">
+              <summary>链接</summary>
+              <div class="links">
+                <a v-for="h in (coinModal.links.homepage||[])" :key="h" :href="h" target="_blank" class="link">{{ h }}</a>
+                <a v-if="coinModal.links.twitter" :href="'https://x.com/'+coinModal.links.twitter" target="_blank" class="link">🐦 {{ coinModal.links.twitter }}</a>
+                <a v-if="coinModal.links.telegram" :href="'https://t.me/'+coinModal.links.telegram" target="_blank" class="link">📱 {{ coinModal.links.telegram }}</a>
+                <a v-if="coinModal.links.reddit" :href="coinModal.links.reddit" target="_blank" class="link">🤖 Reddit</a>
+                <a v-for="g in (coinModal.links.github||[])" :key="g" :href="g" target="_blank" class="link">💻 {{ g.split('/').pop() }}</a>
+                <a v-for="e in (coinModal.links.blockchainExplorer||[])" :key="e" :href="e" target="_blank" class="link">🔍 Explorer</a>
+                <a v-if="coinModal.links.whitepaper" :href="coinModal.links.whitepaper" target="_blank" class="link">📄 Whitepaper</a>
+              </div>
+            </details>
+
+            <details v-if="coinModal.github" class="coin-detail">
+              <summary>GitHub 统计</summary>
+              <div class="gh-stats">
+                <span class="gh-stat">⭐ {{ coinModal.github.stars ?? '—' }}</span>
+                <span class="gh-stat">⑂ {{ coinModal.github.forks ?? '—' }}</span>
+                <span class="gh-stat">👁 {{ coinModal.github.subscribers ?? '—' }}</span>
+                <span class="gh-stat">🔧 {{ coinModal.github.totalIssues ?? '—' }}({{ coinModal.github.closedIssues ?? '—' }}已关)</span>
+                <span class="gh-stat">🔀 {{ coinModal.github.mergedPRs ?? '—' }}</span>
+                <span class="gh-stat">👥 {{ coinModal.github.contributors ?? '—' }}</span>
+                <span class="gh-stat" v-if="coinModal.github.commits4Weeks !== null">📝 近4周 {{ coinModal.github.commits4Weeks }} 次提交</span>
+              </div>
+            </details>
+
+            <details v-if="coinModal.social" class="coin-detail">
+              <summary>社区数据</summary>
+              <div class="gh-stats">
+                <span v-if="coinModal.social.twitterFollowers !== null" class="gh-stat">🐦 Twitter {{ coinModal.social.twitterFollowers }} 关注</span>
+                <span v-if="coinModal.social.redditSubscribers !== null" class="gh-stat">🤖 Reddit {{ coinModal.social.redditSubscribers }} 订阅</span>
+                <span v-if="coinModal.social.telegramUsers !== null" class="gh-stat">📱 Telegram {{ coinModal.social.telegramUsers }} 用户</span>
+              </div>
+            </details>
+
+            <div v-if="coinSearch && (coinSearch.team || coinSearch.history || coinSearch.wiki)" class="coin-detail">
+              <summary class="search-summary">团队 / 历史</summary>
+              <div v-if="coinSearch.wiki" class="search-section">
+                <b>百科</b>
+                <p class="desc-text">{{ coinSearch.wiki.extract }}</p>
+                <a v-if="coinSearch.wiki.url" :href="coinSearch.wiki.url" target="_blank" class="link">查看完整百科 →</a>
+              </div>
+              <div v-if="coinSearch.team" class="search-section">
+                <b>团队 / 创始人</b>
+                <p class="desc-text">{{ coinSearch.team }}</p>
+              </div>
+              <div v-if="coinSearch.history" class="search-section">
+                <b>历史事件</b>
+                <p class="desc-text">{{ coinSearch.history }}</p>
+              </div>
             </div>
-          </div>
+            <div v-if="coinSearchLoading" class="modal-hint small">正在搜索团队/历史…</div>
+            <div v-if="coinSearch && !coinSearch.team && !coinSearch.history && !coinSearch.wiki" class="modal-hint small">未找到团队/历史信息（可尝试补充搜索）</div>
+
+            <div v-if="coinModal.exchanges && coinModal.exchanges.length" class="exch-box">
+              <b>已上线交易所（{{ coinModal.exchanges.length }} 家）</b>
+              <div class="exch-tags">
+                <span v-for="x in coinModal.exchanges" :key="x" class="exch-tag">{{ x }}</span>
+              </div>
+            </div>
+          </template>
         </template>
       </div>
     </div>
@@ -656,6 +734,102 @@ watch(
   max-width: calc(100vw - 40px);
   max-height: 80vh;
   overflow: auto;
+}
+.coin-modal {
+  width: 600px;
+  max-width: calc(100vw - 40px);
+  max-height: 85vh;
+}
+.coin-detail {
+  margin-top: 10px;
+  border-top: 1px solid #1e2329;
+  padding-top: 8px;
+}
+.coin-detail summary {
+  color: #f0b90b;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+}
+.desc-text {
+  color: #848e9c;
+  font-size: 12px;
+  line-height: 1.6;
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  background: #0b0e11;
+  border-radius: 4px;
+}
+.plat-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 4px 0;
+  font-size: 12px;
+}
+.plat-name {
+  color: #eaecef;
+  min-width: 120px;
+  font-weight: 500;
+}
+.plat-addr {
+  color: #848e9c;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  word-break: break-all;
+  background: #0b0e11;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.link {
+  color: #4f8ef7;
+  font-size: 12px;
+  text-decoration: none;
+  padding: 2px 8px;
+  background: #0b0e11;
+  border-radius: 4px;
+  border: 1px solid #1e2329;
+}
+.link:hover {
+  color: #f0b90b;
+  border-color: #f0b90b;
+}
+.gh-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.gh-stat {
+  background: #0b0e11;
+  border: 1px solid #1e2329;
+  border-radius: 4px;
+  padding: 3px 8px;
+  color: #848e9c;
+  font-size: 11px;
+  font-family: 'SF Mono', Menlo, monospace;
+}
+.search-section {
+  margin-top: 8px;
+}
+.search-section b {
+  color: #eaecef;
+  font-size: 12px;
+  display: block;
+  margin-bottom: 4px;
+}
+.modal-hint.small {
+  font-size: 11px;
+  color: #5e6673;
 }
 .modal-head {
   display: flex;

@@ -15,7 +15,16 @@ const STRATEGIES = [
   { id: 'up', name: '上涨趋势', desc: '多头排列 + 趋势强度 + 量能 + 布林上轨', score: ['MA20>MA50>MA200 (+25)', '价>MA20 (+15)', 'ADX>25 (+15)', 'RSI 50-70 (+15)', '量比>1 (+10)', '贴近/破上轨 (+20)'] },
   { id: 'down', name: '下跌趋势', desc: '空头排列 + 趋势强度 + 量能 + 布林下轨', score: ['MA20<MA50<MA200 (+25)', '价<MA20 (+15)', 'ADX>25 (+15)', 'RSI<40 (+15)', '量比>1 (+10)', '贴近/破下轨 (+20)'] },
   { id: 'top', name: '山顶转折', desc: '超买 + 资金费率 + 布林上轨', score: ['RSI(6)≥80 (+25)', '乖离>10% (+20)', '资金费率>0.05% (+15)', '贴近/破上轨 (+40)'] },
-  { id: 'bottom', name: '山底待涨', desc: '超卖 + 资金费率 + 布林下轨', score: ['RSI(6)≤20 (+25)', '乖离<-10% (+20)', '资金费率<-0.05% (+15)', '贴近/破下轨 (+40)'] },
+  { id: 'bottom', name: '山底待涨', desc: '可勾选条件（超卖/乖离/费率/下轨/缩幅），支持任一/全部匹配', score: ['RSI(6)≤30', '乖离≤-8%', '资金费率≤-0.01%', '贴近/破下轨', 'N日高低差≤阈值（可选天数）'] },
+]
+
+// 山底待涨的可勾选条件（每个的开关 + 匹配任一/全部）
+const BOTTOM_CONDITIONS = [
+  { id: 'rsi', name: '超卖 RSI(6) ≤ 30' },
+  { id: 'dev', name: '乖离 ≤ -8%' },
+  { id: 'funding', name: '资金费率为负' },
+  { id: 'boll', name: '贴近/破布林下轨' },
+  { id: 'range', name: 'N日高低差 ≤ 30%', days: true },
 ]
 
 const view = ref('up')
@@ -24,6 +33,10 @@ const params = ref({ r1: 7, r2: 3, r4: 5, r5: 3 })
 const mode = ref('any')
 const month = ref('')
 const minScore = ref(60)
+const bottomConds = ref({ rsi: true, dev: true, funding: true, boll: true, range: false })
+const bottomMode = ref('any')
+const rangeDays = ref(15)
+const rangePct = ref(30)
 const loading = ref(false)
 const error = ref('')
 const rows = ref([])
@@ -38,6 +51,7 @@ const trackError = ref('')
 let timer = null
 
 const enabledCount = computed(() => RULES.filter((r) => checked.value[r.id]).length)
+const bottomEnabledCount = computed(() => Object.values(bottomConds.value).filter(Boolean).length)
 const currentStrategy = computed(() => STRATEGIES.find((s) => s.id === view.value))
 
 function ruleTitle(r) {
@@ -157,6 +171,7 @@ const strategyCols = {
     { key: 'dev20', label: '乖离', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(1) + '%') },
     { key: 'fundingRate', label: '资金费率', fmt: (v) => fmtRate(v) },
     { key: 'boll', label: '布林', fmt: (v) => (v === null || v === undefined ? '—' : v) },
+    { key: 'rangePct', label: '高低差', fmt: (v) => (v === null || v === undefined ? '—' : v.toFixed(1) + '%') },
   ],
 }
 
@@ -221,6 +236,13 @@ async function run() {
     let res
     if (view.value === 'rules') {
       res = await startScreener({ ...checked.value }, mode.value, month.value, params.value)
+    } else if (view.value === 'bottom') {
+      res = await startScreenerStrategies(
+        [view.value],
+        month.value,
+        minScore.value,
+        { bottom: { conditions: { ...bottomConds.value }, mode: bottomMode.value, rangeDays: rangeDays.value, rangePct: rangePct.value } }
+      )
     } else {
       res = await startScreenerStrategies([view.value], month.value, minScore.value)
     }
@@ -334,7 +356,7 @@ onBeforeUnmount(stopPoll)
   <div class="screen">
     <div class="head">
       <h2>指标选股（全量 USDT 永续合约）</h2>
-      <button class="btn" :disabled="loading || (view === 'rules' && enabledCount === 0)" @click="run">
+      <button class="btn" :disabled="loading || (view === 'rules' && enabledCount === 0) || (view === 'bottom' && bottomEnabledCount === 0)" @click="run">
         {{ loading ? '扫描中…' : '开始扫描' }}
       </button>
     </div>
@@ -381,12 +403,42 @@ onBeforeUnmount(stopPoll)
       </div>
     </div>
 
+    <div v-if="view === 'bottom'" class="rules">
+      <span class="rule-title">山底待涨条件</span>
+      <div v-for="c in BOTTOM_CONDITIONS" :key="c.id" class="rule">
+        <label class="check">
+          <input v-model="bottomConds[c.id]" type="checkbox" :disabled="loading" />
+          <b>{{ c.name }}</b>
+        </label>
+        <template v-if="c.days && bottomConds[c.id]">
+          <select v-model.number="rangeDays" class="param-input" :disabled="loading" title="缩幅统计天数">
+            <option :value="15">15 日</option>
+            <option :value="60">60 日</option>
+            <option :value="120">120 日</option>
+          </select>
+          <select v-model.number="rangePct" class="param-input" :disabled="loading" title="最高与最低价差阈值">
+            <option :value="20">≤20%</option>
+            <option :value="30">≤30%</option>
+            <option :value="40">≤40%</option>
+          </select>
+        </template>
+      </div>
+      <span class="desc">N日高低差 = 最近 N 天最高价与最低价之差 ÷ 最低价；缩幅条件可选天数（15/60/120）与阈值（20%/30%/40%）</span>
+    </div>
+
     <div class="ctrl-row">
       <template v-if="view === 'rules'">
         <span class="mode-label">匹配逻辑：</span>
         <div class="seg">
           <button :class="{ active: mode === 'any' }" :disabled="loading" @click="mode = 'any'">任一满足</button>
           <button :class="{ active: mode === 'all' }" :disabled="loading" @click="mode = 'all'">全部满足</button>
+        </div>
+      </template>
+      <template v-else-if="view === 'bottom'">
+        <span class="mode-label">匹配逻辑：</span>
+        <div class="seg">
+          <button :class="{ active: bottomMode === 'any' }" :disabled="loading" @click="bottomMode = 'any'">任一满足</button>
+          <button :class="{ active: bottomMode === 'all' }" :disabled="loading" @click="bottomMode = 'all'">全部满足</button>
         </div>
       </template>
       <template v-else>
@@ -398,7 +450,8 @@ onBeforeUnmount(stopPoll)
       <button v-if="month" class="clear-btn" :disabled="loading" @click="month = ''">清空</button>
       <span class="note">
         <template v-if="view === 'rules'">已勾选 {{ enabledCount }} 个规则 · 全量约 400+ 合约，为防 IP 限流已强制降速，首次约需 2-4 分钟；选择上架月份后只扫描该月上架的合约</template>
-        <template v-else>{{ currentStrategy ? currentStrategy.name : '' }}：趋势策略仅用已缓存日K（零新增请求）；转折策略先按 RSI/乖离初筛候选池，再对候选拉取费率/布林，全量约需 1-2 分钟</template>
+        <template v-else-if="view === 'bottom'">{{ currentStrategy.name }}：已勾选 {{ bottomEnabledCount }} 个条件，按「{{ bottomMode === 'all' ? '全部满足' : '任一满足' }}」筛选；「高低差」列显示缩幅条件实际值，勾选缩幅项后可用天数/阈值下拉</template>
+        <template v-else>{{ currentStrategy ? currentStrategy.name : '' }}：仅用已缓存日K（零新增请求）；按最低评分筛选，全量约需 1-2 分钟</template>
       </span>
       <span v-if="meta" class="note right">最近扫描 {{ new Date(meta.generatedAt).toLocaleString('zh-CN') }}，命中 {{ rows.length }} 个<span v-if="meta.month">（上架 {{ meta.month }}）</span></span>
     </div>
@@ -612,6 +665,12 @@ onBeforeUnmount(stopPoll)
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.rule-title {
+  color: #f0b90b;
+  font-size: 13px;
+  font-weight: 600;
+  padding-right: 6px;
 }
 .check {
   display: flex;

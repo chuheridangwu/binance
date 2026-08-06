@@ -109,10 +109,10 @@ export function fetchScreenerResults() {
   return api('/api/screener')
 }
 
-export function startScreenerStrategies(strategies, month, minScore) {
+export function startScreenerStrategies(strategies, month, minScore, config) {
   return api('/api/screener/strategies', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ strategies, month: month || '', minScore }),
+    body: JSON.stringify({ strategies, month: month || '', minScore, config: config || {} }),
   })
 }

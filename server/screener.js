@@ -330,12 +330,88 @@ export function scoreBottom(f) {
   const sig = []
   if (f.rsi6 <= 20) { s += 25; sig.push('RSI6≤20') }
   else if (f.rsi6 <= 30) { s += 15; sig.push('RSI6≤30') }
-  if (f.dev20 !== null && f.dev20 <= -10) { s += 20; sig.push(`乖离${f.dev20.toFixed(1)}%`) }
-  else if (f.dev20 !== null && f.dev20 <= -6) { s += 12; sig.push(`乖离${f.dev20.toFixed(1)}%`) }
+  if (f.dev20 !== null && f.dev20 <= -10) { s += 20; sig.push(`乖离${f.dev20.toFixed(0)}%`) }
+  else if (f.dev20 !== null && f.dev20 <= -6) { s += 12; sig.push(`乖离${f.dev20.toFixed(0)}%`) }
   if (f.fundingRate !== null && f.fundingRate <= -0.05) { s += 15; sig.push('费率极负') }
   else if (f.fundingRate !== null && f.fundingRate <= -0.01) { s += 8; sig.push('费率为负') }
   if (f.bollNearLower || f.bollBrokeLower) { s += 40; sig.push('贴/破下轨') }
   return { score: s, sig }
+}
+
+// 山底待涨默认条件配置（前端可改，运行时可传 opts.bottom 覆盖）
+export const BOTTOM_DEFAULT = {
+  conditions: { rsi: true, dev: true, funding: true, boll: true, range: false },
+  mode: 'any',
+  rangeDays: 15,
+  rangePct: 30,
+}
+
+// 计算最近 N 日内最高与最低价之间的价差（相对最低价）幅度 %
+function calcHighLowPct(klines, days) {
+  const slice = klines.slice(-days)
+  if (!slice.length) return null
+  let hi = -Infinity
+  let lo = Infinity
+  for (const k of slice) {
+    if (k.high > hi) hi = k.high
+    if (k.low < lo) lo = k.low
+  }
+  if (!Number.isFinite(hi) || !(lo > 0)) return null
+  return (hi - lo) / lo * 100
+}
+
+// 自定义条件版「山底待涨」：按勾选的条件 + 任一/全部匹配。kl=futures日K
+export function evalBottom(kl, f, cfg) {
+  const conds = cfg.conditions || {}
+  const enabled = []
+  const checks = []
+
+  if (conds.rsi) {
+    const ok = f.rsi6 !== null && f.rsi6 <= 30
+    enabled.push('rsi')
+    checks.push({ id: 'rsi', ok, label: f.rsi6 !== null ? `RSI6 ${f.rsi6.toFixed(0)}` : 'RSI6 —', weight: 25 })
+  }
+  if (conds.dev) {
+    const ok = f.dev20 !== null && f.dev20 <= -8
+    enabled.push('dev')
+    checks.push({ id: 'dev', ok, label: f.dev20 !== null ? `乖离${f.dev20.toFixed(0)}%` : '乖离 —', weight: 20 })
+  }
+  if (conds.funding) {
+    const ok = f.fundingRate !== null && f.fundingRate <= -0.01
+    enabled.push('funding')
+    checks.push({
+      id: 'funding',
+      ok,
+      label: f.fundingRate !== null ? `费率${(f.fundingRate * 100).toFixed(3)}%` : '费率 —',
+      weight: 15,
+    })
+  }
+  if (conds.boll) {
+    const ok = f.bollNearLower || f.bollBrokeLower
+    enabled.push('boll')
+    checks.push({ id: 'boll', ok, label: '贴/破下轨', weight: 40 })
+  }
+  let range = null
+  if (conds.range) {
+    enabled.push('range')
+    const days = Math.max(5, Number(cfg.rangeDays) || 15)
+    const pct = Math.max(0.5, Number(cfg.rangePct) || 30)
+    const v = calcHighLowPct(kl, days)
+    range = { days, pct, value: v === null ? null : v }
+    checks.push({ id: 'range', ok: v !== null && v <= pct, label: v !== null ? `${days}日高低差${v.toFixed(0)}%` : '缩幅 —', weight: 30 })
+  }
+  if (!enabled.length) return null
+
+  const pass = checks.filter((c) => c.ok)
+  const ok = cfg.mode === 'all' ? pass.length === enabled.length : pass.length > 0
+  const score = pass.reduce((s, c) => s + c.weight, 0)
+  return {
+    ok,
+    score,
+    mode: cfg.mode,
+    range,
+    sig: pass.map((c) => c.label),
+  }
 }
 
 export function scoreUp(f) {
@@ -381,6 +457,13 @@ export async function scanStrategies(strategies, opts = {}) {
   const ids = Array.isArray(strategies) ? strategies : [strategies]
   const want = new Set(ids.filter((id) => STRATEGIES.some((s) => s.id === id)))
   if (!want.size) throw new Error('至少选择一个策略')
+
+  const cfg = opts.config || {}
+  const bottomCfg = {
+    ...BOTTOM_DEFAULT,
+    ...(cfg.bottom || {}),
+    conditions: { ...BOTTOM_DEFAULT.conditions, ...((cfg.bottom || {}).conditions || {}) },
+  }
 
   state.running = true
   state.total = 0
@@ -429,21 +512,35 @@ export async function scanStrategies(strategies, opts = {}) {
           } else if (sid === 'down') {
             res = scoreDown(f)
             row.metrics = { ...row.metrics, ma20: f.ma20, ma50: f.ma50, ma200: f.ma200, adx: f.adx, rsi14: f.rsi14, volRatio: f.volRatio, dev20: f.dev20, boll: bollLabel(f, 'down') }
-          } else if (sid === 'top' || sid === 'bottom') {
-            const overbought = (f.rsi6 !== null && f.rsi6 >= 70) || (f.dev20 !== null && f.dev20 >= 6)
-            const oversold = (f.rsi6 !== null && f.rsi6 <= 30) || (f.dev20 !== null && f.dev20 <= -6)
-            const isCandidate = sid === 'top' ? overbought : oversold
-            if (!isCandidate) continue
+          } else if (sid === 'top') {
             let fr = null
             try {
-              const funding = await getFundingRates()
-              fr = funding.get(sym) ?? null
+              fr = (await getFundingRates()).get(sym) ?? null
             } catch { /* 费率不可用则忽略 */ }
             const full = { ...f, fundingRate: fr }
-            res = sid === 'top' ? scoreTop(full) : scoreBottom(full)
-            row.metrics = { ...row.metrics, rsi6: f.rsi6, dev20: f.dev20, fundingRate: fr, boll: bollLabel(f, sid === 'top' ? 'up' : 'down') }
+            res = scoreTop(full)
+            row.metrics = { ...row.metrics, rsi6: f.rsi6, dev20: f.dev20, fundingRate: fr, boll: bollLabel(f, 'up') }
+          } else if (sid === 'bottom') {
+            let fr = null
+            try {
+              fr = (await getFundingRates()).get(sym) ?? null
+            } catch { /* 费率不可用则忽略 */ }
+            const full = { ...f, fundingRate: fr }
+            const evalRes = evalBottom(kl, full, bottomCfg)
+            if (!evalRes) continue
+            const { score, sig, ok, range } = evalRes
+            res = { score, sig, ok }
+            row.metrics = {
+              ...row.metrics,
+              rsi6: f.rsi6, dev20: f.dev20, fundingRate: fr,
+              boll: bollLabel(f, 'down'),
+              rangePct: range?.value ?? null,
+              rangeDays: range?.days ?? null,
+              rangeOk: range?.ok ?? null,
+            }
           }
-          if (res && res.score >= minScore) {
+          const qualified = res && (sid === 'bottom' ? !!res.ok : res.score >= minScore)
+          if (qualified) {
             row.strategy.push(sid)
             row.score = Math.max(row.score || 0, res.score)
             row.signals.push(...res.sig)
@@ -475,6 +572,7 @@ export async function scanStrategies(strategies, opts = {}) {
       mode: 'strategies',
       strategies: [...want],
       minScore,
+      config: cfg,
       month: (opts.month || '').trim(),
       results,
       generatedAt: Date.now(),

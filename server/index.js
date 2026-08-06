@@ -161,7 +161,8 @@ app.post('/api/screener/strategies', async (req, res) => {
     const strategies = Array.isArray(req.body.strategies) ? req.body.strategies : ['up']
     const month = typeof req.body.month === 'string' ? req.body.month : ''
     const minScore = Number(req.body.minScore) || 60
-    const result = await screener.scanStrategies(strategies, { month, minScore })
+    const config = req.body.config || {}
+    const result = await screener.scanStrategies(strategies, { month, minScore, config })
     res.json({ ok: true, ...result, state: screener.getScanState() })
   } catch (e) {
     res.status(400).json({ error: e.message })

@@ -69,8 +69,9 @@
 - `server/binance.js`：新增 `getFundingRates()`（`/premiumIndex` 无参一次取全市场，5min 内存缓存，Map symbol→lastFundingRate）与 `getLongShortRatio(symbol)`（`topLongShortAccountRatio?period=1d&limit=1`，10min Map 缓存，返回 `{ratio,long,short}` 或 null）。注意 `getFundingRates` 返回 **Map**，取值要用 `.get(sym)` 不是 `[sym]`。**`getLongShortRatio` 当前已无调用方**（多空比条件已从反转策略移除），保留备用。
 - `server/screener.js`：
   - 新增 `STRATEGIES` 元数据、`buildKlineFeatures()`（MA20/50/200、RSI6/RSI14、ADX、乖离 dev20、量比、20日高低、布林贴近/破轨标志）、`adx()`（Wilder 平滑）、`scoreUp/scoreDown/scoreTop/scoreBottom`、`bollLabel()`（布林列显示文案）。
-  - 新增 `scanStrategies(strategies, { month, minScore })` 入口：趋势策略只用已落库日K（零新增请求）；反转策略先按 RSI/乖离初筛候选池 → 只对候选拉资金费率（多空比/OI 已去掉，不再拉取）。输出统一 `{symbol, listed, price, score, signals[], strategy[], metrics{}}`，持久化到同一 `data/scan-results.json`（meta.mode='strategies'）。
-- `server/index.js`：`GET /api/screener` 附带 `strategies` 元数据；新增 `POST /api/screener/strategies`（body: `{strategies:[], month, minScore}`）。
+  - 新增 `scanStrategies(strategies, { month, minScore, config })` 入口：趋势策略只用已落库日K（零新增请求）；反转策略先按 RSI/乖离初筛候选池 → 只对候选拉资金费率（多空比/OI 已去掉，不再拉取）。输出统一 `{symbol, listed, price, score, signals[], strategy[], metrics{}}`，持久化到同一 `data/scan-results.json`（meta.mode='strategies'）。
+  - **山底待涨可选条件版（2026-08 新增）**：`scanStrategies` 支持 `opts.config.bottom`，key 即 body 里的 `config`（`index.js` 透传）。`BOTTOM_DEFAULT = {conditions:{rsi:true,dev:true,funding:true,boll:true,range:false}, mode:'any', rangeDays:15, rangePct:30}`。`evalBottom(kl, f, cfg)` 把山底从"评分制"改成"可勾选条件+任一/全部匹配"：每个条件可开关（RSI6≤30 / 乖离≤-8% / 费率≤-0.01% / 贴破下轨 / 缩幅），`mode==='all'` 要求所有勾选条件都命中，`any` 则任一命中；返回 `{ok, score, mode, range, sig}`。新增 `calcHighLowPct(kl, days)` 与 `rangeWithin` 逻辑——缩幅条件：最近 N 日最高价与最低价之差 ≤ 最低价的 rangePct%（天数和阈值前端可选 15/60/120 日、20/30/40%）。山底行 metrics 增加 `rangePct/rangeDays/rangeOk`。`top` 分支保持原评分制不变。
+- `server/index.js`：`GET /api/screener` 附带 `strategies` 元数据；新增 `POST /api/screener/strategies`（body: `{strategies:[], month, minScore, config}`）。
 - `src/api/monitor.js`：新增 `startScreenerStrategies(strategies, month, minScore)`。
 - `src/components/ScreenerPanel.vue`：四个策略 Tab + 规则扫描 Tab；每个策略显示评分构成；最低评分可调；表格列评分/信号标签/指标列，点击行跳行情图。加载历史结果时若为 strategies 模式自动切到对应 Tab。
 - **未实测**：本机连不上币安 API，资金费率/多空比字段与币安实际返回是否一致需线上验证（HANDOFF 第 3 节）。

@@ -172,7 +172,10 @@ app.post('/api/screener/strategies', async (req, res) => {
 app.get('/api/listings', (_req, res) => {
   const now = new Date()
   const rows = db.prepare('SELECT symbol, date, title, source FROM listings ORDER BY date ASC').all()
-  const activeSyms = new Set(db.prepare('SELECT symbol FROM symbols WHERE active = 1').all().map((r) => r.symbol))
+  const activeSets = {
+    spot: new Set(db.prepare("SELECT symbol FROM symbols WHERE market = 'spot' AND active = 1").all().map((r) => r.symbol)),
+    futures: new Set(db.prepare("SELECT symbol FROM symbols WHERE market = 'futures' AND active = 1").all().map((r) => r.symbol)),
+  }
   const underlying = binance.buildUnderlyingMap()
   const coinInfoCache = new Map()
   const coinInfoFor = (base) => {
@@ -187,13 +190,15 @@ app.get('/api/listings', (_req, res) => {
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     const base = String(r.symbol).toUpperCase().replace(/USDT$/, '')
     const kind = binance.classifyKind(r.symbol, r.title, underlying.get(String(r.symbol).toUpperCase()))
+    const market = listingMarket(r)
     const item = {
       symbol: r.symbol,
       date: d.toISOString(),
       title: r.title,
       source: r.source,
       kind,
-      delisted: isDelisted(r.symbol, activeSyms, kind),
+      market,
+      delisted: isDelisted(r.symbol, activeSets, kind, market),
       coinInfo: coinInfoFor(base),
     }
     const pk = `${key}|${base}`
@@ -505,14 +510,36 @@ function pearson(x, y) {
 
 // 已下架判定：当前币安 USDT 现货/合约里都不在交易即为已下架
 // 公告行符号多为 base（ARB），行情反推行符号为完整对（BTCUSDT），两种都兼容
-function isDelisted(symbol, activeSyms, kind) {
-  if (!activeSyms.size) return null
+// 判断某条 listing 属于现货还是合约
+function listingMarket(r) {
+  if (r.source === 'market-diff') return 'futures'
+  if (r.market === 'futures') return 'futures'
+  const t = String(r.title || '')
+  // 公告标题区分：Will Launch ... Perpetual / Will Open Trading → 合约；Will List → 现货
+  if (/Perpetual|Will Launch|Will Open Trading/i.test(t)) return 'futures'
+  return 'spot'
+}
+
+// 已下架判定：按市场区分。activeSets = { spot: Set, futures: Set }
+// 币的合约下了但现货还活着，则合约标记下架、现货不标
+function isDelisted(symbol, activeSets, kind, market) {
+  const spot = activeSets.spot
+  const futures = activeSets.futures
+  if (!spot.size && !futures.size) return null
   const s = String(symbol).toUpperCase()
   const full = s.endsWith('USDT') ? s : s + 'USDT'
-  const active = activeSyms.has(s) || activeSyms.has(full)
   // base 形态的股票/商品代币是 2021 年 BUSD 计价产品（早已下架），
   // 与同名 2026 USDT 永续（AAPLUSDT 等）是不同产品，不能因后者活跃而判为未下架
   if (!s.endsWith('USDT') && (kind === 'stock' || kind === 'commodity')) return true
+  // 按 listing 所属市场判断：只查对应市场的活跃集合
+  const set = market === 'futures' ? futures : spot
+  const active = set.has(s) || set.has(full)
+  // 若该市场集合为空（还没拉到对应市场数据），退回综合判断
+  if (!set.size) {
+    const combined = new Set([...spot])
+    for (const x of futures) combined.add(x)
+    return !(combined.has(s) || combined.has(full))
+  }
   return !active
 }
 

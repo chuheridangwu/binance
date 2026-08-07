@@ -50,6 +50,21 @@ export function fetchListingPerformance(months) {
   return api('/api/listing-performance?months=' + (months || 6))
 }
 
+export function fetchMeme(params) {
+  const q = new URLSearchParams()
+  if (params && params.windowHours) q.set('windowHours', String(params.windowHours))
+  if (params && params.threshold) q.set('threshold', String(params.threshold))
+  const qs = q.toString()
+  return api('/api/meme' + (qs ? '?' + qs : ''))
+}
+
+export function fetchSimilar(symbol, days) {
+  const q = new URLSearchParams()
+  if (symbol) q.set('symbol', symbol)
+  if (days) q.set('days', String(days))
+  return api('/api/similar?' + q.toString())
+}
+
 export function fetchStatus() {
   return api('/api/status')
 }

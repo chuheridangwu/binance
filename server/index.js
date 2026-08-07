@@ -395,6 +395,114 @@ function monthKey2(ts) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
+// 妖币统计：找出 N 小时内涨幅 ≥ 阈值 的币（窗口 24h-5天，阈值 50%-150% 可调）
+// 基准价 = market.db 1h K线里"现在-窗口"时刻的价格，现价 = 实时全市场价
+app.get('/api/meme', async (req, res) => {
+  try {
+    const windowHours = Math.min(120, Math.max(1, Number(req.query.windowHours) || 24))
+    const threshold = Math.min(150, Math.max(50, Number(req.query.threshold) || 50))
+    const prices = await binance.getFuturesPrices()
+    const symbols = await binance.getPerpetualSymbols()
+    const listingDate = new Map(db.prepare('SELECT symbol, MIN(date) AS d FROM listings GROUP BY symbol').all().map((r) => [r.symbol.toUpperCase(), r.d]))
+    const cutoff = Date.now() - windowHours * 3600 * 1000
+    const results = []
+    for (const sym of symbols) {
+      const price = prices.get(sym)
+      if (!price) continue
+      const row = mkt.prepare('SELECT close FROM klines WHERE symbol = ? AND interval = ? AND time < ? ORDER BY time DESC LIMIT 1').get(sym, '1h', cutoff)
+      if (!row || !(row.close > 0)) continue
+      const ret = (price / row.close - 1) * 100
+      if (ret >= threshold) {
+        results.push({
+          symbol: sym,
+          ret: round1(ret),
+          price,
+          basePrice: row.close,
+          listed: listingDate.get(sym.toUpperCase()) ? monthKey2(listingDate.get(sym.toUpperCase())) : '',
+        })
+      }
+    }
+    results.sort((a, b) => b.ret - a.ret)
+    res.json({ results, windowHours, threshold, count: results.length, generatedAt: Date.now() })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+function round1(v) {
+  return Math.round(v * 10) / 10
+}
+
+// 相似趋势：给定一个币，用日收益率序列的 Pearson 相关系数找趋势最相似的币
+app.get('/api/similar', async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').toUpperCase()
+    const days = Math.min(120, Math.max(7, Number(req.query.days) || 30))
+    const top = Math.min(30, Number(req.query.top) || 12)
+    if (!symbol) return res.status(400).json({ error: 'symbol 必填' })
+    const full = symbol.endsWith('USDT') ? symbol : symbol + 'USDT'
+    const cutoff = Date.now() - days * 24 * 3600 * 1000
+    const targetKl = mkt.prepare('SELECT time, close FROM klines WHERE symbol = ? AND interval = ? AND time >= ? ORDER BY time ASC').all(full, '1d', cutoff)
+    if (targetKl.length < 10) return res.status(400).json({ error: '目标币历史数据不足（需 ≥10 根日K，可能在回补中）' })
+    const targetRet = dailyReturns(targetKl)
+    const targetMap = new Map(targetRet.map((r) => [r.time, r.ret]))
+    const prices = await binance.getFuturesPrices()
+    const symbols = await binance.getPerpetualSymbols()
+    const sims = []
+    for (const sym of symbols) {
+      if (sym === full) continue
+      const kl = mkt.prepare('SELECT time, close FROM klines WHERE symbol = ? AND interval = ? AND time >= ? ORDER BY time ASC').all(sym, '1d', cutoff)
+      if (kl.length < 8) continue
+      const symMap = new Map(dailyReturns(kl).map((r) => [r.time, r.ret]))
+      const x = []
+      const y = []
+      for (const [t, rv] of targetMap) {
+        if (symMap.has(t)) { x.push(rv); y.push(symMap.get(t)) }
+      }
+      if (x.length < 8) continue
+      const corr = pearson(x, y)
+      if (!Number.isFinite(corr)) continue
+      const last = kl[kl.length - 1]
+      const first = kl[0]
+      sims.push({
+        symbol: sym,
+        similarity: Math.round(corr * 1000) / 1000,
+        currentPrice: prices.get(sym) ?? null,
+        retWindow: first.close > 0 ? round1((last.close / first.close - 1) * 100) : null,
+      })
+    }
+    sims.sort((a, b) => b.similarity - a.similarity)
+    res.json({ symbol, full, days, results: sims.slice(0, top), count: sims.length, generatedAt: Date.now() })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+function dailyReturns(kl) {
+  const out = []
+  for (let i = 1; i < kl.length; i++) {
+    if (kl[i - 1].close > 0) out.push({ time: kl[i].time, ret: kl[i].close / kl[i - 1].close - 1 })
+  }
+  return out
+}
+
+function pearson(x, y) {
+  const n = x.length
+  if (n < 2) return NaN
+  const mx = x.reduce((a, b) => a + b, 0) / n
+  const my = y.reduce((a, b) => a + b, 0) / n
+  let num = 0, dx = 0, dy = 0
+  for (let i = 0; i < n; i++) {
+    const xd = x[i] - mx
+    const yd = y[i] - my
+    num += xd * yd
+    dx += xd * xd
+    dy += yd * yd
+  }
+  const den = Math.sqrt(dx) * Math.sqrt(dy)
+  return den === 0 ? 0 : num / den
+}
+
 // 已下架判定：当前币安 USDT 现货/合约里都不在交易即为已下架
 // 公告行符号多为 base（ARB），行情反推行符号为完整对（BTCUSDT），两种都兼容
 function isDelisted(symbol, activeSyms, kind) {

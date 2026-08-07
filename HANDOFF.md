@@ -65,6 +65,7 @@
   - **增强字段（2026-08 新增）**：`getCoinInfo` 拉取参数改为 `community_data=true&developer_data=true`，额外获取：描述 `description.en`、分类 `categories`、合约地址 `platforms`、链接 `links`（homepage/twitter/telegram/reddit/github/explorer/whitepaper）、GitHub 统计（star/fork/issue/PR/contributor/commit）、社区统计（Twitter/Reddit/Telegram 关注数）。弹窗改为折叠面板形式：基础信息表 + 项目简介 + 合约地址 + 链接 + GitHub 统计 + 社区数据 + 团队/历史（Web 搜索）。
   - **Web 搜索补充（2026-08 新增）**：`GET /api/coininfo/search?symbol=ARB` 调用 `searchCoinInfo(symbol)`，先查 Wikipedia 百科（`/api/rest_v1/page/summary`），再用 DuckDuckGo Instant Answer API 搜索团队/创始人/历史事件信息。结果存 `cg_cache` key `web_符号` 24h，前端弹窗自动加载到「团队 / 历史」折叠区。本地网络访问不了 CoinGecko（和币安一样），需线上验证。
   - **供应量分析（2026-08 新增）**：`GET /api/coin-supply?maxSupply=1000000000&tolerance=0.1`（或 `supplyMin`/`supplyMax` 区间）查 `app.db` 的 `cg_cache` 所有已缓存币（排除 `web_%` key），算当前价 = 市值÷流通量，返回 `coins[]`（symbol/name/maxSupply/circulatingSupply/marketCapUsd/price/athUsd/atlUsd）+ `summary`（币数/最低价/最高价/中位价/总市值）。前端新增「供应分析」Tab（`SupplyAnalysis.vue`）：按目标最大供应量+容差或区间过滤，表格可排序/搜索，点击行跳行情。数据全部来自已缓存，**零新增 API 请求**。
+  - **上新表现追踪（2026-08 新增）**：`GET /api/listing-performance?months=6`（默认真实 6 个月）查 `listings` 表（按 symbol 取最早上架日）→ 匹配 `market.db` 的 1d K线（symbol 需转完整对 ARB→ARBUSDT，`time` 单位毫秒）→ 取上架日首个日K收盘为基准价，算上线后 7/30/90 天涨跌幅 + 当前价/当前涨跌。返回 `results[]` + `summary`（平均/中位/最高/最低涨跌、上涨占比 gainRate）。前端新增「上新表现」Tab（`ListingPerformance.vue`）：时间范围可选，表格 7D/30D/90D/当前涨跌红绿显示、可排序搜索，点击行跳行情。**依赖 `market.db` 历史回补完成**，回补中会显示"暂无数"。
 
 功能完整可用，已合入 main 并推送。新增：新币/套利**邮件通知失败自动重试**（见下）。
 

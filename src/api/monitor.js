@@ -46,6 +46,10 @@ export function fetchCoinSupply(params) {
   return api('/api/coin-supply' + (qs ? '?' + qs : ''))
 }
 
+export function fetchListingPerformance(months) {
+  return api('/api/listing-performance?months=' + (months || 6))
+}
+
 export function fetchStatus() {
   return api('/api/status')
 }

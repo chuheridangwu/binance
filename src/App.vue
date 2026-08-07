@@ -6,6 +6,7 @@ import SettingsPanel from './components/SettingsPanel.vue'
 import SpreadPanel from './components/SpreadPanel.vue'
 import ScreenerPanel from './components/ScreenerPanel.vue'
 import SupplyAnalysis from './components/SupplyAnalysis.vue'
+import ListingPerformance from './components/ListingPerformance.vue'
 import Login from './components/Login.vue'
 import { store, setAuthed } from './store'
 import { authStatus, logout } from './api/monitor'
@@ -44,6 +45,7 @@ onMounted(async () => {
           <button :class="{ active: store.activeTab === 'screener' }" @click="store.activeTab = 'screener'">指标选股</button>
           <button :class="{ active: store.activeTab === 'stats' }" @click="store.activeTab = 'stats'">月度上新统计</button>
           <button :class="{ active: store.activeTab === 'supply' }" @click="store.activeTab = 'supply'">供应分析</button>
+          <button :class="{ active: store.activeTab === 'perf' }" @click="store.activeTab = 'perf'">上新表现</button>
           <button :class="{ active: store.activeTab === 'settings' }" @click="store.activeTab = 'settings'">监控设置</button>
         </nav>
         <button class="logout" @click="onLogout">退出登录</button>
@@ -54,6 +56,7 @@ onMounted(async () => {
         <ScreenerPanel v-show="store.activeTab === 'screener'" />
         <ListingsStats v-show="store.activeTab === 'stats'" />
         <SupplyAnalysis v-show="store.activeTab === 'supply'" />
+        <ListingPerformance v-show="store.activeTab === 'perf'" />
         <SettingsPanel v-show="store.activeTab === 'settings'" />
       </main>
     </template>

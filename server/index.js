@@ -11,7 +11,7 @@ import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 import * as screener from './screener.js'
 import { listTrackers, createTracker, deleteTracker } from './trackers.js'
 import { getCoinInfo, getCachedCoinInfo, searchCoinInfo } from './coingecko.js'
-import { getHistoryStatus, startHistory } from './history.js'
+import { getHistoryStatus, startHistory, mkt } from './history.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -317,6 +317,82 @@ function median(arr) {
   const s = [...arr].sort((a, b) => a - b)
   const mid = Math.floor(s.length / 2)
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2
+}
+
+// 上新表现追踪：用上架日期 + market.db 的 1d K线，算上线后 7/30/90 天涨跌幅
+// query: months=6 只看最近N个月上新；返回 coin 列表 + 汇总(平均/破发率)
+app.get('/api/listing-performance', (req, res) => {
+  const months = Number(req.query.months) || 6
+  const cutoff = Date.now() - months * 30 * 24 * 3600 * 1000
+  const rows = db
+    .prepare('SELECT symbol, MIN(date) AS date FROM listings WHERE date >= ? GROUP BY symbol')
+    .all(cutoff)
+
+  const DAY = 24 * 3600 * 1000
+  const results = []
+  for (const r of rows) {
+    const s = String(r.symbol).toUpperCase()
+    const full = s.endsWith('USDT') ? s : s + 'USDT'
+    const kl = mkt
+      .prepare('SELECT time, close FROM klines WHERE symbol = ? AND interval = ? ORDER BY time ASC')
+      .all(full, '1d')
+    if (!kl.length) continue
+    const listingMs = Number(r.date)
+    // 找到上架日当天/之后的第一个日K作为基准价
+    let baseIdx = kl.findIndex((k) => k.time >= listingMs)
+    if (baseIdx < 0) continue
+    const basePrice = kl[baseIdx].close
+    if (!(basePrice > 0)) continue
+    const retDays = [7, 30, 90].map((d) => {
+      const target = listingMs + d * DAY
+      const k2 = kl.find((k) => k.time >= target)
+      return k2 && basePrice > 0 ? (k2.close / basePrice - 1) * 100 : null
+    })
+    const last = kl[kl.length - 1]
+    const current = last.close
+    results.push({
+      symbol: s,
+      listed: monthKey2(listingMs),
+      basePrice,
+      ret7: retDays[0],
+      ret30: retDays[1],
+      ret90: retDays[2],
+      currentPrice: last.close,
+      currentRet: basePrice > 0 ? (current / basePrice - 1) * 100 : null,
+    })
+  }
+
+  // 汇总：近30天表现的分布
+  const scores = results.map((x) => x.ret30).filter((v) => v !== null)
+  const all = results.map((x) => x.currentRet).filter((v) => v !== null)
+  const summarize = (arr) => {
+    if (!arr.length) return null
+    const pos = arr.filter((v) => v > 0).length
+    const avg = arr.reduce((a, b) => a + b, 0) / arr.length
+    const sorted = [...arr].sort((a, b) => a - b)
+    return {
+      count: arr.length,
+      avg,
+      median: median(arr),
+      max: sorted[sorted.length - 1],
+      min: sorted[0],
+      gainRate: arr.length ? (pos / arr.length) * 100 : 0,
+    }
+  }
+  const summary = {
+    count: results.length,
+    ret7: summarize(scores.length ? results.map((x) => x.ret7).filter((v) => v !== null) : []),
+    ret30: summarize(scores),
+    ret90: summarize(results.map((x) => x.ret90).filter((v) => v !== null)),
+    current: summarize(all),
+  }
+  results.sort((a, b) => (b.ret30 ?? -Infinity) - (a.ret30 ?? -Infinity))
+  res.json({ results, summary, months, generatedAt: Date.now() })
+})
+
+function monthKey2(ts) {
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
 // 已下架判定：当前币安 USDT 现货/合约里都不在交易即为已下架

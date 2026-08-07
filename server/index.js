@@ -253,6 +253,72 @@ app.get('/api/coininfo/search', async (req, res) => {
   }
 })
 
+// 供应量分析：查 cg_cache 里已缓存的币，计算当前价（市值÷流通量），可按最大供应量过滤
+// query: maxSupply=1000000000 目标最大供应量；tolerance=0.1 容差(默认10%)；或 supplyMin/supplyMax 区间
+// 返回 coin 列表 + 汇总(最高/最低单价、个数、中位市值)
+app.get('/api/coin-supply', (req, res) => {
+  const raw = db.prepare("SELECT data FROM cg_cache WHERE symbol NOT LIKE 'web_%'").all()
+  const coins = []
+  for (const r of raw) {
+    let d
+    try { d = JSON.parse(r.data) } catch { continue }
+    if (!d || d.found !== true) continue
+    const { maxSupply, circulatingSupply, marketCapUsd, fdvUsd } = d
+    if (!(circulatingSupply > 0)) continue
+    const price = marketCapUsd !== null ? marketCapUsd / circulatingSupply : null
+    coins.push({
+      symbol: d.symbol,
+      name: d.name || '',
+      maxSupply: maxSupply ?? null,
+      circulatingSupply,
+      totalSupply: d.totalSupply ?? null,
+      marketCapUsd: marketCapUsd ?? null,
+      fdvUsd: fdvUsd ?? null,
+      price,
+      athUsd: d.athUsd ?? null,
+      atlUsd: d.atlUsd ?? null,
+    })
+  }
+
+  let filtered = coins
+  const qMax = Number(req.query.maxSupply)
+  const qMin = Number(req.query.supplyMin)
+  const qMax2 = Number(req.query.supplyMax)
+  const tolerance = Number(req.query.tolerance) || 0.1
+  if (Number.isFinite(qMax) && qMax > 0) {
+    filtered = coins.filter((c) => c.maxSupply !== null && c.maxSupply > 0 && Math.abs(c.maxSupply - qMax) / qMax <= tolerance)
+  } else if (Number.isFinite(qMin) || Number.isFinite(qMax2)) {
+    filtered = coins.filter((c) => {
+      if (c.maxSupply === null) return false
+      if (Number.isFinite(qMin) && c.maxSupply < qMin) return false
+      if (Number.isFinite(qMax2) && c.maxSupply > qMax2) return false
+      return true
+    })
+  }
+
+  const withPrice = filtered.filter((c) => c.price !== null)
+  const prices = withPrice.map((c) => c.price)
+  const mcaps = withPrice.map((c) => c.marketCapUsd).filter((v) => v !== null)
+  const summary = {
+    count: filtered.length,
+    withPrice: withPrice.length,
+    minPrice: prices.length ? Math.min(...prices) : null,
+    maxPrice: prices.length ? Math.max(...prices) : null,
+    medianPrice: prices.length ? median(prices) : null,
+    minMcap: mcaps.length ? Math.min(...mcaps) : null,
+    maxMcap: mcaps.length ? Math.max(...mcaps) : null,
+    totalMcap: mcaps.length ? mcaps.reduce((a, b) => a + b, 0) : null,
+  }
+  filtered.sort((a, b) => (b.price ?? -1) - (a.price ?? -1))
+  res.json({ coins: filtered, summary, generatedAt: Date.now() })
+})
+
+function median(arr) {
+  const s = [...arr].sort((a, b) => a - b)
+  const mid = Math.floor(s.length / 2)
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2
+}
+
 // 已下架判定：当前币安 USDT 现货/合约里都不在交易即为已下架
 // 公告行符号多为 base（ARB），行情反推行符号为完整对（BTCUSDT），两种都兼容
 function isDelisted(symbol, activeSyms, kind) {

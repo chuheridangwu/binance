@@ -36,6 +36,16 @@ export function fetchCoinInfoSearch(symbol) {
   return api('/api/coininfo/search?symbol=' + encodeURIComponent(symbol))
 }
 
+export function fetchCoinSupply(params) {
+  const q = new URLSearchParams()
+  if (params && params.maxSupply) q.set('maxSupply', String(params.maxSupply))
+  if (params && params.tolerance) q.set('tolerance', String(params.tolerance))
+  if (params && params.supplyMin) q.set('supplyMin', String(params.supplyMin))
+  if (params && params.supplyMax) q.set('supplyMax', String(params.supplyMax))
+  const qs = q.toString()
+  return api('/api/coin-supply' + (qs ? '?' + qs : ''))
+}
+
 export function fetchStatus() {
   return api('/api/status')
 }

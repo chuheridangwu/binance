@@ -90,9 +90,10 @@ async function fetchAndStoreSymbols() {
       const market = base === FUTURES ? 'futures' : 'spot'
       try {
         const data = await getJson(`${base}/exchangeInfo`)
+        // 先把该市场所有币标记为不活跃，有下架 but 被移除的币也会被正确标记
+        db.prepare('UPDATE symbols SET active = 0 WHERE market = ?').run(market)
         for (const s of data.symbols) {
           if (s.quoteAsset !== 'USDT') continue
-          // futures 才有 underlyingType（STOCK/COMMODITY 等代表股票/商品永续，如 AAPLUSDT、XAGUSDT）
           stmt.run(s.symbol, market, s.status === 'TRADING' ? 1 : 0, s.contractType || '', s.underlyingType || '', now)
         }
       } catch {

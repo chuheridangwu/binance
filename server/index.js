@@ -11,6 +11,7 @@ import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 import * as screener from './screener.js'
 import { listTrackers, createTracker, deleteTracker } from './trackers.js'
 import { getCoinInfo, getCachedCoinInfo, searchCoinInfo } from './coingecko.js'
+import * as rootdata from './rootdata.js'
 import { getHistoryStatus, startHistory, mkt } from './history.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -256,6 +257,26 @@ app.get('/api/coininfo/search', async (req, res) => {
   } catch (e) {
     res.status(502).json({ error: e.message })
   }
+})
+
+// RootData 币信息：按符号抓取并入库（基础信息+团队+时间线）
+app.get('/api/rootdata', async (req, res) => {
+  const symbol = String(req.query.symbol || '').toUpperCase()
+  if (!symbol) return res.status(400).json({ error: 'symbol 必填' })
+  try {
+    const info = await rootdata.getCoinInfo(symbol)
+    res.json(info)
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
+})
+
+// RootData 缓存情况统计
+app.get('/api/rootdata/status', (_req, res) => {
+  const total = db.prepare('SELECT COUNT(*) c FROM rd_cache').get().c
+  const found = db.prepare("SELECT COUNT(*) c FROM rd_cache WHERE data LIKE '%\"found\":true%'").get().c
+  const recent = db.prepare('SELECT COUNT(*) c FROM rd_cache WHERE fetched_at >= ?').get(Date.now() - 3600 * 1000).c
+  res.json({ total, found, recent, cached: db.prepare('SELECT symbol, fetched_at FROM rd_cache ORDER BY fetched_at DESC LIMIT 10').all() })
 })
 
 // 供应量分析：查 cg_cache 里已缓存的币，计算当前价（市值÷流通量），可按最大供应量过滤
@@ -608,4 +629,15 @@ app.listen(PORT, () => {
   console.log(`[server] listening on http://0.0.0.0:${PORT}`)
   monitor.startMonitor()
   startHistory()
+  // RootData 慢速预取：不阻塞主流程，每 6 分钟跑一批，用户不赶进度，间隔本身极慢
+  const rdRun = async () => {
+    try {
+      const n = await rootdata.enrichListings({ limit: 8, months: 6 })
+      if (n) console.log(`[rootdata] 预取入库 ${n} 个币`)
+    } catch (e) {
+      console.error('[rootdata] 预取失败:', e.message)
+    }
+  }
+  setTimeout(() => rdRun().catch(() => {}), 20 * 1000)
+  setInterval(() => rdRun().catch(() => {}), 6 * 60 * 1000).unref?.()
 })

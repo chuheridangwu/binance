@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS cg_cache (
   data       TEXT,
   fetched_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS rd_cache (
+  symbol     TEXT PRIMARY KEY,
+  data       TEXT,
+  fetched_at INTEGER
+);
 CREATE INDEX IF NOT EXISTS idx_listings_date ON listings(date);
 CREATE INDEX IF NOT EXISTS idx_kline_cache_lookup ON kline_cache(symbol, interval, fetched_at);
 CREATE INDEX IF NOT EXISTS idx_oi_cache_lookup ON oi_cache(symbol, fetched_at);

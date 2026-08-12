@@ -36,6 +36,9 @@ const macdSignal = ref(9)
 const suggestions = ref([])
 const lastBar = ref(null)
 const hovered = ref(null)
+const measureOn = ref(false)
+const selRect = ref(null)
+const selStats = ref(null)
 
 const emaPeriods = computed(() =>
   emaText.value
@@ -170,6 +173,14 @@ function initCharts() {
   volumeChart.subscribeCrosshairMove((p) => onCrosshair('main', p))
   macdChart?.subscribeCrosshairMove((p) => onCrosshair('macd', p))
   rsiChart?.subscribeCrosshairMove((p) => onCrosshair('rsi', p))
+
+  if (measureOn.value) {
+    mainChart.applyOptions({
+      handleScale: false,
+      handleScroll: false,
+      crosshair: { mode: CrosshairMode.Magnet },
+    })
+  }
 }
 
 function onCrosshair(kind, param) {
@@ -357,6 +368,9 @@ function handleRangeChange() {
 }
 
 function reload() {
+  selecting = false
+  selRect.value = null
+  selStats.value = null
   initCharts()
   loadData()
 }
@@ -392,6 +406,149 @@ onMounted(() => {
 onBeforeUnmount(() => {
   charts.forEach((c) => c.remove())
   charts = []
+})
+
+// ---- 框选测量：在 main 面板按下拖动画矩形，松手基于已加载K线算区间统计 ----
+let selecting = false
+let selStart = { x: 0, y: 0 }
+
+function mainPaneEl() {
+  return document.querySelector('#pane-main')
+}
+
+function paneCoords(e) {
+  const rect = mainPaneEl().getBoundingClientRect()
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+}
+
+function onPaneDown(e) {
+  if (!measureOn.value) return
+  if (e.button !== 0) return
+  const p = paneCoords(e)
+  selecting = true
+  selStart = p
+  selRect.value = { x1: p.x, y1: p.y, x2: p.x, y2: p.y }
+  selStats.value = null
+  const el = mainPaneEl()
+  try { el.setPointerCapture(e.pointerId) } catch {}
+}
+
+function onPaneMove(e) {
+  if (!selecting || !measureOn.value) return
+  const p = paneCoords(e)
+  selRect.value = { ...selStart, x2: p.x, y2: p.y }
+}
+
+function onPaneUp(e) {
+  if (!selecting || !measureOn.value) return
+  selecting = false
+  const r = selRect.value
+  selRect.value = null
+  if (!r || Math.abs(r.x2 - r.x1) < 5) {
+    selStats.value = null
+    return
+  }
+  const x1 = Math.min(r.x1, r.x2)
+  const x2 = Math.max(r.x1, r.x2)
+  try {
+    const t1 = mainChart.timeScale().coordinateToTime(x1)
+    const t2 = mainChart.timeScale().coordinateToTime(x2)
+    if (typeof t1 !== 'number' || typeof t2 !== 'number') {
+      selStats.value = null
+      return
+    }
+    const lo = Math.min(t1, t2)
+    const hi = Math.max(t1, t2)
+    const i1 = timeIndex.get(lo)
+    const i2 = timeIndex.get(hi)
+    if (i1 === undefined || i2 === undefined) {
+      selStats.value = null
+      return
+    }
+    let maxHigh = -Infinity
+    let minLow = Infinity
+    let hiIdx = i1
+    let loIdx = i1
+    for (let i = i1; i <= i2; i++) {
+      const k = klinesCache[i]
+      if (!k) continue
+      if (k.high > maxHigh) { maxHigh = k.high; hiIdx = i }
+      if (k.low < minLow) { minLow = k.low; loIdx = i }
+    }
+    const diff = maxHigh - minLow
+    const pct = minLow > 0 ? (diff / minLow) * 100 : 0
+    // 区间覆盖的交易天数（按自然日去重），1d 周期下约等于 K 线根数
+    const daySet = new Set()
+    for (let i = i1; i <= i2; i++) {
+      const k = klinesCache[i]
+      if (k) daySet.add(Math.floor(k.time / 86400))
+    }
+    selStats.value = {
+      hi: maxHigh,
+      lo: minLow,
+      diff,
+      pct,
+      bars: i2 - i1 + 1,
+      days: daySet.size,
+      hiTime: klinesCache[hiIdx]?.time,
+      loTime: klinesCache[loIdx]?.time,
+      fromTime: klinesCache[i1]?.time,
+      toTime: klinesCache[i2]?.time,
+    }
+  } catch {
+    selStats.value = null
+  }
+}
+
+function toggleMeasure() {
+  measureOn.value = !measureOn.value
+  selecting = false
+  selRect.value = null
+  selStats.value = null
+  mainChart.applyOptions({
+    handleScale: !measureOn.value,
+    handleScroll: !measureOn.value,
+    crosshair: { mode: measureOn.value ? CrosshairMode.Magnet : CrosshairMode.Normal },
+  })
+}
+
+watch(measureOn, (v) => {
+  if (!v) {
+    selecting = false
+    selRect.value = null
+    selStats.value = null
+  }
+})
+
+function fmtDate(sec) {
+  if (!sec) return '—'
+  const d = new Date(sec * 1000)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+const rectStyle = computed(() => {
+  const r = selRect.value
+  if (!r) return {}
+  const x = Math.min(r.x1, r.x2)
+  const y = Math.min(r.y1, r.y2)
+  const w = Math.abs(r.x2 - r.x1)
+  const h = Math.abs(r.y2 - r.y1)
+  return { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' }
+})
+
+const statsStyle = computed(() => {
+  const r = selRect.value
+  if (!r) return {}
+  const x = Math.min(r.x1, r.x2)
+  const w = Math.abs(r.x2 - r.x1)
+  const top = Math.min(r.y1, r.y2)
+  const left = x + w + 12
+  const nearRight = left + 240 > (mainPaneEl()?.clientWidth || 0)
+  return {
+    left: (nearRight ? Math.max(6, x - 240) : left) + 'px',
+    top: Math.max(6, top) + 'px',
+  }
 })
 
 watch([showEma, showMacd, showRsi], () => nextTick(reload))
@@ -460,6 +617,10 @@ watch(
         <label class="check"><input v-model="showRsi" type="checkbox" /> RSI</label>
         <input v-model.number="rsiPeriod" type="number" class="num" min="2" max="100" title="RSI 周期" @change="refreshIndicators" />
       </div>
+
+      <button class="btn measure-btn" :class="{ active: measureOn }" @click="toggleMeasure">
+        {{ measureOn ? '测量中·点击退出' : '框选测量' }}
+      </button>
     </div>
 
     <div class="ohlc-bar">
@@ -475,9 +636,36 @@ watch(
     </div>
 
     <div class="chart-stack">
-      <div class="pane pane-main">
+      <div class="pane pane-main" :class="{ measuring: measureOn }">
         <span class="watermark">{{ symbol }} · {{ interval }}</span>
-        <div id="pane-main" class="chart-el"></div>
+        <div
+          id="pane-main"
+          class="chart-el"
+          @pointerdown="onPaneDown"
+          @pointermove="onPaneMove"
+          @pointerup="onPaneUp"
+          @pointercancel="onPaneUp"
+        ></div>
+        <div v-if="selRect" class="sel-overlay" :style="rectStyle"></div>
+        <div v-if="selStats" class="sel-stats" :style="statsStyle">
+          <div class="stats-title">区间统计</div>
+          <div class="stats-row">
+            <span>最高 <b class="up">{{ fmtPrice(selStats.hi) }}</b></span>
+            <span class="dim">{{ fmtDate(selStats.hiTime) }}</span>
+          </div>
+          <div class="stats-row">
+            <span>最低 <b class="down">{{ fmtPrice(selStats.lo) }}</b></span>
+            <span class="dim">{{ fmtDate(selStats.loTime) }}</span>
+          </div>
+          <div class="stats-row">
+            <span>价差 <b>{{ fmtPrice(selStats.diff) }}</b></span>
+            <span>幅度 <b class="up">{{ selStats.pct.toFixed(2) }}%</b></span>
+          </div>
+          <div class="stats-row">
+            <span>覆盖 <b>{{ selStats.bars }}</b> 根K线</span>
+            <span>约 <b>{{ selStats.days }}</b> 个交易日</span>
+          </div>
+        </div>
       </div>
       <div class="pane pane-volume">
         <div id="pane-volume" class="chart-el"></div>
@@ -634,6 +822,25 @@ watch(
 .num:focus {
   border-color: #f0b90b;
 }
+.btn.measure-btn {
+  background: #1e2329;
+  border: 1px solid #2b3139;
+  color: #848e9c;
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn.measure-btn:hover {
+  color: #eaecef;
+  border-color: #3e4550;
+}
+.btn.measure-btn.active {
+  color: #f0b90b;
+  border-color: #f0b90b;
+  background: rgba(240, 185, 11, 0.12);
+  font-weight: 600;
+}
 input[type='number'].num::-webkit-outer-spin-button,
 input[type='number'].num::-webkit-inner-spin-button {
   -webkit-appearance: none;
@@ -692,6 +899,50 @@ input[type='number'].num::-webkit-inner-spin-button {
 .pane {
   position: relative;
   width: 100%;
+}
+.pane-main.measuring {
+  cursor: crosshair;
+}
+.pane-main.measuring .chart-el {
+  cursor: crosshair;
+}
+.sel-overlay {
+  position: absolute;
+  border: 1px dashed #f0b90b;
+  background: rgba(240, 185, 11, 0.12);
+  pointer-events: none;
+  z-index: 6;
+}
+.sel-stats {
+  position: absolute;
+  z-index: 7;
+  background: rgba(19, 23, 34, 0.95);
+  border: 1px solid #2b3139;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #eaecef;
+  pointer-events: none;
+  min-width: 220px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+.stats-title {
+  color: #f0b90b;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  color: #848e9c;
+}
+.stats-row b {
+  color: #eaecef;
+}
+.stats-row .dim {
+  color: #5e6673;
 }
 .pane-main {
   flex: 1 0 auto;

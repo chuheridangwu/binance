@@ -434,6 +434,136 @@ app.get('/api/meme', async (req, res) => {
   }
 })
 
+// 潜力新币：找上市 ≤months 个月内、无爆拉历史、具备初期炒作特征的低位币。
+// 特征可开关且阈值可调（低单价/高波动/近期放量/费率异常），每个满足给 1 分，
+// 已爆拉(上市以来最大涨幅超 maxRise%)的直接排除。数据源复用 market.db，无需额外请求。
+app.get('/api/potential', async (req, res) => {
+  try {
+    const months = Math.min(12, Math.max(1, Number(req.query.months) || 12))
+    const maxRise = Math.min(300, Math.max(30, Number(req.query.maxRise) || 100))
+    const minAmpl = Math.min(200, Math.max(10, Number(req.query.minAmpl) || 40))
+    const volDays = Math.min(20, Math.max(3, Number(req.query.volDays) || 7))
+    const volRatio = Math.min(10, Math.max(1.2, Number(req.query.volRatio) || 2))
+    const fundingAbs = Math.min(0.5, Math.max(0.01, Number(req.query.fundingAbs) || 0.02))
+    const use = {
+      lowPrice: req.query.lowPrice !== '0',
+      highVol: req.query.highVol !== '0',
+      volume: req.query.volume !== '0',
+      funding: req.query.funding !== '0',
+    }
+    const dlc = []
+    if (use.lowPrice) dlc.push('lowPrice')
+    if (use.highVol) dlc.push('highVol')
+    if (use.volume) dlc.push('volume')
+    if (use.funding) dlc.push('funding')
+
+    const cutoff = new Date()
+    cutoff.setMonth(cutoff.getMonth() - months)
+    cutoff.setHours(0, 0, 0, 0)
+    const now = Date.now()
+    const prices = await binance.getFuturesPrices()
+    const fundingRates = await binance.getFundingRates()
+    const listingDate = new Map(
+      db.prepare('SELECT symbol, MIN(date) AS d FROM listings GROUP BY symbol')
+        .all()
+        .map((r) => [r.symbol.toUpperCase(), r.d])
+    )
+    // 1年内上架的、仍活跃的合约
+    const candidates = db.prepare(
+      "SELECT symbol FROM symbols WHERE market='futures' AND active=1 AND fetched_at = (SELECT MAX(fetched_at) FROM symbols)"
+    ).all()
+
+    const results = []
+    for (const row of candidates) {
+      const sym = row.symbol
+      const listed = listingDate.get(sym.toUpperCase())
+      if (!listed || listed < cutoff.getTime()) continue // 要求有上架记录且在窗口内
+
+      // 无爆拉：上市以来任意时刻的最大涨幅 < maxRise%，基于 1h K线上市起点价
+      const first1h = mkt.prepare('SELECT close, time FROM klines WHERE symbol = ? AND interval = ? AND time >= ? ORDER BY time ASC LIMIT 1').get(sym, '1h', listed)
+      if (!last1d || !first1h || !(first1h.close > 0)) continue
+      const ageDays = Math.round((now - first1h.time) / 86400000)
+      if (ageDays < 2) continue // 数据太新，特征无法计算
+      if (listed > now) continue
+
+      const price = prices.get(sym)
+      if (!price || !(price > 0)) continue
+
+      // 上市以来最大涨幅（用1h序列里最高的 close）
+      const maxClose = mkt.prepare('SELECT MAX(close) m FROM klines WHERE symbol = ? AND interval = ? AND time >= ?').get(sym, '1h', listed)?.m || 0
+      const maxRisePct = (maxClose / first1h.close - 1) * 100
+      if (maxRisePct > 2000) continue // 极端异常数据跳过
+      if (maxRisePct >= maxRise) continue // 硬性无爆拉
+
+      // --- 特征打分 ---
+      const checked = []
+      // 低单价
+      if (dlc.includes('lowPrice') && price < 1) checked.push({ id: 'lowPrice', label: '低单价', detail: `$${price.toPrecision(4)}` })
+      // 高波动：上市以来日K振幅均值
+      let ampl = 0
+      if (dlc.includes('highVol')) {
+        const days = mkt.prepare('SELECT high, low, close FROM klines WHERE symbol = ? AND interval = ? AND time >= ?').all(sym, '1d', listed)
+        if (days.length >= 2) {
+          let sum = 0, cnt = 0
+          for (const d of days) {
+            if (d.high > 0 && d.low > 0) { sum += (d.high / d.low - 1); cnt++ }
+          }
+          ampl = cnt ? (sum / cnt) * 100 : 0
+        }
+        if (ampl >= minAmpl) checked.push({ id: 'highVol', label: '高波动', detail: `日振幅${round1(ampl)}%` })
+      }
+      // 近期放量：近 volDays 天均量 vs 上市以来其余日均量
+      if (dlc.includes('volume')) {
+        const rows = mkt.prepare('SELECT time, quote_volume v FROM klines WHERE symbol = ? AND interval = ? AND time >= ?').all(sym, '1d', listed)
+        const recentStart = now - volDays * 86400000
+        let recentSum = 0, recentCnt = 0, prevSum = 0, prevCnt = 0
+        for (const r of rows) {
+          if (r.time >= recentStart) { recentSum += r.v || 0; recentCnt++ }
+          else { prevSum += r.v || 0; prevCnt++ }
+        }
+        const recentAvg = recentCnt ? recentSum / recentCnt : 0
+        const prevAvg = prevCnt ? prevSum / prevCnt : 0
+        if (recentAvg > 0 && prevAvg > 0 && recentAvg / prevAvg >= volRatio) {
+          checked.push({ id: 'volume', label: '近期放量', detail: `${round1(recentAvg / prevAvg)}×` })
+        }
+      }
+      // 费率异常：当前费率绝对值超阈值 或 上市以来平均费率高正/高负
+      let fr
+      if (dlc.includes('funding')) {
+        fr = fundingRates.get(sym)
+        const isExtreme = fr !== undefined && Math.abs(fr) >= fundingAbs
+        const avgRow = mkt.prepare('SELECT AVG(rate) a FROM funding WHERE symbol = ? AND time >= ?').get(sym, listed)
+        const avgFr = avgRow?.a || 0
+        const avgExtreme = Math.abs(avgFr) >= fundingAbs
+        if (isExtreme || avgExtreme) checked.push({ id: 'funding', label: '费率异常', detail: fr !== undefined ? `${(fr * 100).toFixed(3)}%` : `均${(avgFr * 100).toFixed(3)}%` })
+      }
+
+      const score = checked.length
+      if (score === 0) continue
+      // 现价相对上市起点涨幅（用于展示，不应过高否则算已起飞）
+      const risePct = (price / first1h.close - 1) * 100
+      if (risePct >= maxRise) continue
+
+      results.push({
+        symbol: sym,
+        score,
+        features: checked.map((c) => c.label),
+        price: price,
+        ageDays,
+        listed: monthKey2(listed),
+        riseSinceList: round1(risePct),
+        maxRise: round1(maxRisePct),
+        amplitude: round1(ampl),
+        funding: fr !== undefined ? Math.round(fr * 100000) / 1000 : null,
+      })
+    }
+    results.sort((a, b) => b.score - a.score || b.riseSinceList - a.riseSinceList)
+    res.json({ results, params: { months, maxRise, minAmpl, volDays, volRatio, fundingAbs }, count: results.length, generatedAt: Date.now() })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 function round1(v) {
   return Math.round(v * 10) / 10
 }

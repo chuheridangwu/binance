@@ -65,6 +65,25 @@ export function fetchSimilar(symbol, days) {
   return api('/api/similar?' + q.toString())
 }
 
+export function fetchPotential(params) {
+  const q = new URLSearchParams()
+  const defaults = { months: 12, maxRise: 100, minAmpl: 40, volDays: 7, volRatio: 2, fundingAbs: 0.02 }
+  const p = { ...defaults, ...(params || {}) }
+  q.set('months', String(p.months))
+  q.set('maxRise', String(p.maxRise))
+  q.set('minAmpl', String(p.minAmpl))
+  q.set('volDays', String(p.volDays))
+  q.set('volRatio', String(p.volRatio))
+  q.set('fundingAbs', String(p.fundingAbs))
+  if (p.use) {
+    q.set('lowPrice', p.use.lowPrice ? '1' : '0')
+    q.set('highVol', p.use.highVol ? '1' : '0')
+    q.set('volume', p.use.volume ? '1' : '0')
+    q.set('funding', p.use.funding ? '1' : '0')
+  }
+  return api('/api/potential?' + q.toString())
+}
+
 export function fetchStatus() {
   return api('/api/status')
 }

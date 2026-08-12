@@ -9,6 +9,7 @@ import SupplyAnalysis from './components/SupplyAnalysis.vue'
 import ListingPerformance from './components/ListingPerformance.vue'
 import MemeScanner from './components/MemeScanner.vue'
 import SimilarCoins from './components/SimilarCoins.vue'
+import PotentialCoins from './components/PotentialCoins.vue'
 import Login from './components/Login.vue'
 import { store, setAuthed } from './store'
 import { authStatus, logout } from './api/monitor'
@@ -50,6 +51,7 @@ onMounted(async () => {
           <button :class="{ active: store.activeTab === 'perf' }" @click="store.activeTab = 'perf'">上新表现</button>
           <button :class="{ active: store.activeTab === 'meme' }" @click="store.activeTab = 'meme'">妖币统计</button>
           <button :class="{ active: store.activeTab === 'similar' }" @click="store.activeTab = 'similar'">相似趋势</button>
+          <button :class="{ active: store.activeTab === 'potential' }" @click="store.activeTab = 'potential'">潜力新币</button>
           <button :class="{ active: store.activeTab === 'settings' }" @click="store.activeTab = 'settings'">监控设置</button>
         </nav>
         <button class="logout" @click="onLogout">退出登录</button>
@@ -63,6 +65,7 @@ onMounted(async () => {
         <ListingPerformance v-show="store.activeTab === 'perf'" />
         <MemeScanner v-show="store.activeTab === 'meme'" />
         <SimilarCoins v-show="store.activeTab === 'similar'" />
+        <PotentialCoins v-show="store.activeTab === 'potential'" />
         <SettingsPanel v-show="store.activeTab === 'settings'" />
       </main>
     </template>
@@ -105,6 +108,8 @@ onMounted(async () => {
 .tabs {
   display: flex;
   gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 .tabs button {
   border: none;

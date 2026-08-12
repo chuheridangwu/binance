@@ -481,7 +481,7 @@ app.get('/api/potential', async (req, res) => {
 
       // 无爆拉：上市以来任意时刻的最大涨幅 < maxRise%，基于 1h K线上市起点价
       const first1h = mkt.prepare('SELECT close, time FROM klines WHERE symbol = ? AND interval = ? AND time >= ? ORDER BY time ASC LIMIT 1').get(sym, '1h', listed)
-      if (!last1d || !first1h || !(first1h.close > 0)) continue
+      if (!first1h || !(first1h.close > 0)) continue
       const ageDays = Math.round((now - first1h.time) / 86400000)
       if (ageDays < 2) continue // 数据太新，特征无法计算
       if (listed > now) continue
@@ -560,6 +560,7 @@ app.get('/api/potential', async (req, res) => {
     results.sort((a, b) => b.score - a.score || b.riseSinceList - a.riseSinceList)
     res.json({ results, params: { months, maxRise, minAmpl, volDays, volRatio, fundingAbs }, count: results.length, generatedAt: Date.now() })
   } catch (e) {
+    console.error('[potential] 扫描失败:', e)
     res.status(500).json({ error: e.message })
   }
 })

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { fetchStatus, fetchSettings, saveSettings, testEmail, triggerMonitor, changePassword } from '../api/monitor'
+import { fetchStatus, fetchSettings, saveSettings, testEmail, triggerMonitor, changePassword, fetchAlerts, createAlert, updateAlert, deleteAlert, resetAlert, previewAlert } from '../api/monitor'
 
 const form = ref({ smtp_host: '', smtp_port: '465', smtp_user: '', smtp_pass: '', recipients: '', spread_alert_enabled: false, spread_alert_threshold: 30, spread_watchlist: '' })
 const pwd = ref({ old_password: '', new_password: '', confirm: '' })
@@ -10,6 +10,11 @@ const testing = ref(false)
 const pwdSaving = ref(false)
 const msg = ref({ type: '', text: '' })
 const settingsLoaded = ref(false)
+const alerts = ref([])
+const alertForm = ref({ symbol: '', indicator: 'rsi', period: 6, threshold: 20, direction: 'lt', active: true })
+const alertLoading = ref(false)
+const preview = ref(null)
+const previewLoading = ref(false)
 
 function show(type, text) {
   msg.value = { type, text }
@@ -92,7 +97,85 @@ async function onChangePwd() {
   }
 }
 
-onMounted(load)
+async function loadAlerts() {
+  try {
+    const r = await fetchAlerts()
+    alerts.value = r.alerts || []
+  } catch (e) {
+    show('err', '加载指标告警失败：' + e.message)
+  }
+}
+
+async function onAddAlert() {
+  if (!alertForm.value.symbol.trim()) {
+    show('err', '请输入交易对')
+    return
+  }
+  alertLoading.value = true
+  show('', '')
+  try {
+    const a = await createAlert({
+      symbol: alertForm.value.symbol.trim().toUpperCase(),
+      indicator: alertForm.value.indicator,
+      period: alertForm.value.period,
+      threshold: alertForm.value.threshold,
+      direction: alertForm.value.direction,
+      active: alertForm.value.active,
+    })
+    await loadAlerts()
+    show('ok', `已添加 ${a.alert.symbol} 指标告警`)
+  } catch (e) {
+    show('err', '添加失败：' + e.message)
+  } finally {
+    alertLoading.value = false
+  }
+}
+
+async function onToggleAlert(a) {
+  try {
+    await updateAlert(a.id, { active: a.active ? 0 : 1 })
+    a.active = a.active ? 0 : 1
+  } catch (e) {
+    show('err', '切换失败：' + e.message)
+  }
+}
+
+async function onDeleteAlert(id) {
+  try {
+    await deleteAlert(id)
+    await loadAlerts()
+  } catch (e) {
+    show('err', '删除失败：' + e.message)
+  }
+}
+
+async function onResetAlert(id) {
+  try {
+    await resetAlert(id)
+    await loadAlerts()
+    show('ok', '告警状态已重置')
+  } catch (e) {
+    show('err', '重置失败：' + e.message)
+  }
+}
+
+async function onPreview() {
+  if (!alertForm.value.symbol.trim()) return
+  previewLoading.value = true
+  preview.value = null
+  try {
+    preview.value = await previewAlert(alertForm.value.symbol.trim().toUpperCase(), alertForm.value.period)
+  } catch (e) {
+    show('err', '查询失败：' + e.message)
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+onMounted(() => {
+  load()
+  loadAlerts()
+})
 </script>
 
 <template>
@@ -135,6 +218,51 @@ onMounted(load)
           <input v-model="form.spread_watchlist" placeholder="BTCUSDT, ETHUSDT, SOLUSDT" />
         </label>
         <p class="tpl-hint">每 5 分钟扫描一次，同一币种每天最多提醒一次。正费率=多头付空头，负费率=空头付多头。</p>
+      </div>
+
+      <div class="card">
+        <h3>指标告警</h3>
+        <p class="tpl-hint">为交易对设置指标阈值（如 RSI(6) ≤ 20），满足即发邮件。解除冷却：指标回到阈值另一侧后才允许再次提醒，避免持续触发轰炸。</p>
+        <div class="alert-form">
+          <input v-model="alertForm.symbol" class="text-input" placeholder="交易对，如 BTCUSDT" @keyup.enter="onAddAlert" />
+          <select v-model="alertForm.period">
+            <option :value="6">RSI(6)</option>
+            <option :value="14">RSI(14)</option>
+          </select>
+          <select v-model="alertForm.direction">
+            <option value="lt">≤</option>
+            <option value="gt">≥</option>
+          </select>
+          <input v-model.number="alertForm.threshold" class="text-input" type="number" placeholder="阈值" />
+          <button class="btn primary" :disabled="alertLoading" @click="onAddAlert">{{ alertLoading ? '添加中…' : '添加' }}</button>
+        </div>
+        <div class="alert-preview">
+          <button class="btn" :disabled="previewLoading" @click="onPreview">{{ previewLoading ? '查询中…' : '查看当前值' }}</button>
+          <span v-if="preview" class="preview-val">
+            {{ preview.symbol }} RSI({{ preview.period }}) = <b>{{ preview.value !== null ? preview.value.toFixed(2) : 'N/A' }}</b>
+            <span v-if="preview.error" class="err">（{{ preview.error }}）</span>
+          </span>
+        </div>
+        <table class="alert-table" v-if="alerts.length">
+          <thead>
+            <tr><th>交易对</th><th>指标</th><th>条件</th><th>当前值</th><th>最近提醒</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="a in alerts" :key="a.id" :class="{ off: !a.active }">
+              <td>{{ a.symbol }}</td>
+              <td>{{ a.indicator.toUpperCase() }}({{ a.period }})</td>
+              <td>{{ a.direction === 'lt' ? '≤' : '≥' }} {{ a.threshold }}</td>
+              <td>{{ a.last_value !== null && a.last_value !== undefined ? a.last_value.toFixed(2) : '-' }}</td>
+              <td>{{ a.notified_at ? new Date(a.notified_at).toLocaleString('zh-CN') : '-' }}</td>
+              <td>
+                <button class="btn mini" @click="onToggleAlert(a)">{{ a.active ? '停用' : '启用' }}</button>
+                <button class="btn mini danger" @click="onResetAlert(a.id)">重置</button>
+                <button class="btn mini danger" @click="onDeleteAlert(a.id)">删除</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="tpl-hint">暂无指标告警，先在上方添加。</p>
       </div>
 
       <div class="card">
@@ -261,6 +389,69 @@ textarea.tpl:focus {
   color: #5e6673;
   font-size: 12px;
   line-height: 1.6;
+}
+.alert-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.alert-form select,
+.alert-form .text-input {
+  background: #181a20;
+  color: #eaecef;
+  border: 1px solid #2b3139;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 14px;
+}
+.alert-form .text-input {
+  width: 160px;
+}
+.alert-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.preview-val {
+  color: #eaecef;
+  font-size: 13px;
+}
+.preview-val b {
+  color: #f0b90b;
+}
+.preview-val .err {
+  color: #f6465d;
+}
+.alert-table {
+  margin-top: 12px;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.alert-table th,
+.alert-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid #2b3139;
+}
+.alert-table th {
+  color: #5e6673;
+  font-weight: 600;
+}
+.alert-table .off {
+  opacity: 0.45;
+}
+.btn.mini {
+  padding: 3px 8px;
+  font-size: 12px;
+  margin-right: 4px;
+}
+.btn.danger {
+  background: #2a1d1d;
+  color: #f6465d;
 }
 .check {
   display: flex;

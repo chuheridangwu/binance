@@ -68,6 +68,20 @@ CREATE TABLE IF NOT EXISTS muted_symbols (
   symbol     TEXT PRIMARY KEY,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ind_alerts (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  symbol       TEXT NOT NULL,
+  indicator    TEXT NOT NULL DEFAULT 'rsi',
+  period       INTEGER NOT NULL DEFAULT 6,
+  threshold    REAL NOT NULL,
+  direction    TEXT NOT NULL DEFAULT 'lt',
+  active       INTEGER NOT NULL DEFAULT 1,
+  last_value   REAL,
+  last_at      INTEGER,
+  notified_at  INTEGER,
+  cooldown_until INTEGER DEFAULT 0,
+  created_at   INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS cg_search (
   symbol     TEXT PRIMARY KEY,
   coin_id    TEXT DEFAULT '',

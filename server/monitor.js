@@ -3,6 +3,7 @@ import { getPerpetualSymbols, getFirstKlineTime, fetchListingAnnouncements } fro
 import { sendMail } from './mailer.js'
 import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 import { checkTrackers } from './trackers.js'
+import { checkAlerts } from './indicator_alerts.js'
 import * as screener from './screener.js'
 import { enrichCoinInfos } from './coingecko.js'
 
@@ -235,6 +236,16 @@ export async function runOnce() {
       await scanSpreads()
     }
     await checkTrackers()
+    try {
+      const r = await checkAlerts()
+      if (r.triggered) {
+        state.lastEmailAt = Date.now()
+        state.lastEmailTo = (getSetting('recipients') || '').split(/[,;，；\s]+/).filter(Boolean)
+      }
+    } catch (e) {
+      state.scanErrors.push(`指标告警检查失败: ${e.message}`)
+      state.scanErrors = state.scanErrors.slice(-20)
+    }
     await scanScheduledDefault()
     if (Date.now() - state.lastCoinEnrich > 60 * 60 * 1000) {
       try {

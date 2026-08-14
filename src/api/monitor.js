@@ -153,6 +153,41 @@ export function removeMute(symbol) {
   return api(`/api/mute/${encodeURIComponent(symbol)}`, { method: 'DELETE' })
 }
 
+export function fetchAlerts() {
+  return api('/api/alerts')
+}
+
+export function createAlert(payload) {
+  return api('/api/alerts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateAlert(id, payload) {
+  return api(`/api/alerts/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteAlert(id) {
+  return api(`/api/alerts/${id}`, { method: 'DELETE' })
+}
+
+export function resetAlert(id) {
+  return api(`/api/alerts/${id}/reset`, { method: 'POST' })
+}
+
+export function previewAlert(symbol, period) {
+  const q = new URLSearchParams()
+  if (symbol) q.set('symbol', symbol)
+  if (period) q.set('period', String(period))
+  return api('/api/alerts/preview?' + q.toString())
+}
+
 export function screenerStatus() {
   return api('/api/screener/status')
 }

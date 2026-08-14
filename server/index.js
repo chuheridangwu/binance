@@ -10,6 +10,7 @@ import * as auth from './auth.js'
 import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 import * as screener from './screener.js'
 import { listTrackers, createTracker, deleteTracker } from './trackers.js'
+import { listAlerts, createAlert, deleteAlert, updateAlert, resetAlertState, previewAlert } from './indicator_alerts.js'
 import { getCoinInfo, getCachedCoinInfo, searchCoinInfo } from './coingecko.js'
 import { getHistoryStatus, startHistory, mkt } from './history.js'
 
@@ -136,6 +137,58 @@ app.post('/api/trackers', (req, res) => {
 app.delete('/api/trackers/:id', (req, res) => {
   deleteTracker(req.params.id)
   res.json({ ok: true })
+})
+
+// 指标告警规则
+app.get('/api/alerts', (_req, res) => {
+  res.json({ alerts: listAlerts() })
+})
+
+app.post('/api/alerts', (req, res) => {
+  try {
+    const a = createAlert({
+      symbol: req.body.symbol,
+      indicator: req.body.indicator,
+      period: req.body.period,
+      threshold: req.body.threshold,
+      direction: req.body.direction,
+      active: req.body.active,
+    })
+    res.json({ ok: true, alert: a })
+  } catch (e) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
+app.patch('/api/alerts/:id', (req, res) => {
+  try {
+    const a = updateAlert(req.params.id, req.body)
+    res.json({ ok: true, alert: a })
+  } catch (e) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
+app.delete('/api/alerts/:id', (req, res) => {
+  deleteAlert(req.params.id)
+  res.json({ ok: true })
+})
+
+app.post('/api/alerts/:id/reset', (req, res) => {
+  resetAlertState(req.params.id)
+  res.json({ ok: true })
+})
+
+// 指标告警：预览某币当前指标值（不建规则也能看）
+app.get('/api/alerts/preview', async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').toUpperCase()
+    const period = Number(req.query.period) || 6
+    if (!symbol) return res.status(400).json({ error: 'symbol 必填' })
+    res.json(await previewAlert(symbol, period))
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
 })
 
 app.get('/api/mute', (_req, res) => {

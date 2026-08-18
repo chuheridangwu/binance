@@ -82,6 +82,19 @@ CREATE TABLE IF NOT EXISTS ind_alerts (
   cooldown_until INTEGER DEFAULT 0,
   created_at   INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ind_alert_events (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  alert_id     INTEGER NOT NULL,
+  symbol       TEXT NOT NULL,
+  indicator    TEXT NOT NULL,
+  period       INTEGER NOT NULL,
+  threshold    REAL NOT NULL,
+  direction    TEXT NOT NULL,
+  value        REAL NOT NULL,
+  hit          INTEGER NOT NULL DEFAULT 0,
+  emailed      INTEGER NOT NULL DEFAULT 0,
+  created_at   INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS cg_search (
   symbol     TEXT PRIMARY KEY,
   coin_id    TEXT DEFAULT '',

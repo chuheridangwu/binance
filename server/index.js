@@ -10,7 +10,7 @@ import * as auth from './auth.js'
 import { getSpreadData, DEFAULT_WATCH } from './spread.js'
 import * as screener from './screener.js'
 import { listTrackers, createTracker, deleteTracker } from './trackers.js'
-import { listAlerts, createAlert, deleteAlert, updateAlert, resetAlertState, previewAlert } from './indicator_alerts.js'
+import { listAlerts, createAlert, deleteAlert, updateAlert, resetAlertState, previewAlert, listAlertEvents } from './indicator_alerts.js'
 import { getCoinInfo, getCachedCoinInfo, searchCoinInfo } from './coingecko.js'
 import { getHistoryStatus, startHistory, mkt } from './history.js'
 
@@ -178,6 +178,11 @@ app.delete('/api/alerts/:id', (req, res) => {
 app.post('/api/alerts/:id/reset', (req, res) => {
   resetAlertState(req.params.id)
   res.json({ ok: true })
+})
+
+app.get('/api/alerts/:id/events', (req, res) => {
+  const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50))
+  res.json({ events: listAlertEvents(req.params.id, limit) })
 })
 
 // 指标告警：预览某币当前指标值（不建规则也能看）

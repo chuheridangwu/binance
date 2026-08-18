@@ -60,6 +60,20 @@ export function resetAlertState(id) {
   db.prepare('UPDATE ind_alerts SET last_value = NULL, notified_at = NULL, cooldown_until = 0 WHERE id = ?').run(Number(id))
 }
 
+export function listAlertEvents(alertId, limit = 50) {
+  const rows = db
+    .prepare('SELECT * FROM ind_alert_events WHERE alert_id = ? ORDER BY created_at DESC LIMIT ?')
+    .all(Number(alertId), Math.min(200, Math.max(1, Number(limit) || 50)))
+  return rows.map((r) => ({ ...r, hit: !!r.hit, emailed: !!r.emailed }))
+}
+
+function recordEvent(a, value, hit, emailed) {
+  db.prepare(
+    `INSERT INTO ind_alert_events (alert_id, symbol, indicator, period, threshold, direction, value, hit, emailed, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(a.id, a.symbol, a.indicator, a.period, a.threshold, a.direction, value, hit ? 1 : 0, emailed ? 1 : 0, Date.now())
+}
+
 // 计算某币的 RSI 当前值：取 period+1 根日K收盘，返回最后一个 RSI
 async function currentRsi(symbol, period) {
   const klines = await getFuturesKlines(symbol, '1d', period + 1)
@@ -89,6 +103,7 @@ export async function checkAlerts() {
 
     db.prepare('UPDATE ind_alerts SET last_value = ?, last_at = ? WHERE id = ?').run(value, now, a.id)
 
+    let emailed = false
     if (hit && now >= a.cooldown_until) {
       try {
         await sendMail(
@@ -101,11 +116,13 @@ export async function checkAlerts() {
             `<p>冷却 ${COOLDOWN_MS / 3600000} 小时后若仍超阈值会再次提醒。</p>`
         )
         db.prepare('UPDATE ind_alerts SET notified_at = ?, cooldown_until = ? WHERE id = ?').run(now, now + COOLDOWN_MS, a.id)
+        emailed = true
         triggered++
       } catch (e) {
         console.error(`[alert] 邮件发送失败(${a.symbol}):`, e.message)
       }
     }
+    recordEvent(a, value, hit, emailed)
   }
   return { checked: alerts.length, triggered }
 }

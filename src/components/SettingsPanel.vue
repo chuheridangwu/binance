@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { fetchStatus, fetchSettings, saveSettings, testEmail, triggerMonitor, changePassword, fetchAlerts, createAlert, updateAlert, deleteAlert, resetAlert, previewAlert } from '../api/monitor'
+import { fetchStatus, fetchSettings, saveSettings, testEmail, triggerMonitor, changePassword, fetchAlerts, createAlert, updateAlert, deleteAlert, resetAlert, previewAlert, fetchAlertEvents } from '../api/monitor'
 
 const form = ref({ smtp_host: '', smtp_port: '465', smtp_user: '', smtp_pass: '', recipients: '', spread_alert_enabled: false, spread_alert_threshold: 30, spread_watchlist: '' })
 const pwd = ref({ old_password: '', new_password: '', confirm: '' })
@@ -15,6 +15,9 @@ const alertForm = ref({ symbol: '', indicator: 'rsi', period: 6, threshold: 20, 
 const alertLoading = ref(false)
 const preview = ref(null)
 const previewLoading = ref(false)
+const editingAlert = ref(null)
+const expandedAlerts = ref({})
+const alertEvents = ref({})
 
 function show(type, text) {
   msg.value = { type, text }
@@ -114,20 +117,67 @@ async function onAddAlert() {
   alertLoading.value = true
   show('', '')
   try {
-    const a = await createAlert({
-      symbol: alertForm.value.symbol.trim().toUpperCase(),
-      indicator: alertForm.value.indicator,
-      period: alertForm.value.period,
-      threshold: alertForm.value.threshold,
-      direction: alertForm.value.direction,
-      active: alertForm.value.active,
-    })
+    if (editingAlert.value) {
+      await updateAlert(editingAlert.value.id, {
+        symbol: alertForm.value.symbol.trim().toUpperCase(),
+        indicator: alertForm.value.indicator,
+        period: alertForm.value.period,
+        threshold: alertForm.value.threshold,
+        direction: alertForm.value.direction,
+        active: alertForm.value.active,
+      })
+      editingAlert.value = null
+      show('ok', '告警已更新')
+    } else {
+      const a = await createAlert({
+        symbol: alertForm.value.symbol.trim().toUpperCase(),
+        indicator: alertForm.value.indicator,
+        period: alertForm.value.period,
+        threshold: alertForm.value.threshold,
+        direction: alertForm.value.direction,
+        active: alertForm.value.active,
+      })
+      show('ok', `已添加 ${a.alert.symbol} 指标告警`)
+    }
     await loadAlerts()
-    show('ok', `已添加 ${a.alert.symbol} 指标告警`)
   } catch (e) {
-    show('err', '添加失败：' + e.message)
+    show('err', '保存失败：' + e.message)
   } finally {
     alertLoading.value = false
+  }
+}
+
+function onEditAlert(a) {
+  editingAlert.value = a
+  alertForm.value = {
+    symbol: a.symbol,
+    indicator: a.indicator || 'rsi',
+    period: a.period,
+    threshold: a.threshold,
+    direction: a.direction,
+    active: !!a.active,
+  }
+}
+
+function cancelEdit() {
+  editingAlert.value = null
+  alertForm.value = { symbol: '', indicator: 'rsi', period: 6, threshold: 20, direction: 'lt', active: true }
+}
+
+async function toggleEvents(a) {
+  const id = a.id
+  if (expandedAlerts.value[id]) {
+    expandedAlerts.value[id] = false
+    return
+  }
+  expandedAlerts.value[id] = true
+  if (!alertEvents.value[id]) {
+    try {
+      const r = await fetchAlertEvents(id, 50)
+      alertEvents.value[id] = r.events || []
+    } catch (e) {
+      show('err', '加载历史失败：' + e.message)
+    }
   }
 }
 
@@ -234,7 +284,10 @@ onMounted(() => {
             <option value="gt">≥</option>
           </select>
           <input v-model.number="alertForm.threshold" class="text-input" type="number" placeholder="阈值" />
-          <button class="btn primary" :disabled="alertLoading" @click="onAddAlert">{{ alertLoading ? '添加中…' : '添加' }}</button>
+          <button class="btn primary" :disabled="alertLoading" @click="onAddAlert">
+            {{ alertLoading ? '保存中…' : editingAlert ? '保存修改' : '添加' }}
+          </button>
+          <button v-if="editingAlert" class="btn" @click="cancelEdit">取消</button>
         </div>
         <div class="alert-preview">
           <button class="btn" :disabled="previewLoading" @click="onPreview">{{ previewLoading ? '查询中…' : '查看当前值' }}</button>
@@ -248,18 +301,35 @@ onMounted(() => {
             <tr><th>交易对</th><th>指标</th><th>条件</th><th>当前值</th><th>最近提醒</th><th>操作</th></tr>
           </thead>
           <tbody>
-            <tr v-for="a in alerts" :key="a.id" :class="{ off: !a.active }">
-              <td>{{ a.symbol }}</td>
-              <td>{{ a.indicator.toUpperCase() }}({{ a.period }})</td>
-              <td>{{ a.direction === 'lt' ? '≤' : '≥' }} {{ a.threshold }}</td>
-              <td>{{ a.last_value !== null && a.last_value !== undefined ? a.last_value.toFixed(2) : '-' }}</td>
-              <td>{{ a.notified_at ? new Date(a.notified_at).toLocaleString('zh-CN') : '-' }}</td>
-              <td>
-                <button class="btn mini" @click="onToggleAlert(a)">{{ a.active ? '停用' : '启用' }}</button>
-                <button class="btn mini danger" @click="onResetAlert(a.id)">重置</button>
-                <button class="btn mini danger" @click="onDeleteAlert(a.id)">删除</button>
-              </td>
-            </tr>
+            <template v-for="a in alerts" :key="a.id">
+              <tr :class="{ off: !a.active, editing: editingAlert && editingAlert.id === a.id }">
+                <td>{{ a.symbol }}</td>
+                <td>{{ a.indicator.toUpperCase() }}({{ a.period }})</td>
+                <td>{{ a.direction === 'lt' ? '≤' : '≥' }} {{ a.threshold }}</td>
+                <td>{{ a.last_value !== null && a.last_value !== undefined ? a.last_value.toFixed(2) : '-' }}</td>
+                <td>{{ a.notified_at ? new Date(a.notified_at).toLocaleString('zh-CN') : '-' }}</td>
+                <td>
+                  <button class="btn mini" @click="onToggleAlert(a)">{{ a.active ? '停用' : '启用' }}</button>
+                  <button class="btn mini" @click="onEditAlert(a)">编辑</button>
+                  <button class="btn mini" @click="toggleEvents(a)">{{ expandedAlerts[a.id] ? '收起' : '历史' }}</button>
+                  <button class="btn mini danger" @click="onResetAlert(a.id)">重置</button>
+                  <button class="btn mini danger" @click="onDeleteAlert(a.id)">删除</button>
+                </td>
+              </tr>
+              <tr v-if="expandedAlerts[a.id]" class="events-row">
+                <td colspan="6">
+                  <div v-if="(alertEvents[a.id] || []).length" class="events">
+                    <div v-for="e in alertEvents[a.id]" :key="e.id" class="event">
+                      <span class="ev-time">{{ new Date(e.created_at).toLocaleString('zh-CN') }}</span>
+                      <span class="ev-val">RSI({{ e.period }}) = {{ e.value.toFixed(2) }}</span>
+                      <span :class="e.hit ? 'ev-hit' : 'ev-miss'">{{ e.hit ? '触发' : '未触发' }}</span>
+                      <span v-if="e.hit" :class="e.emailed ? 'ev-mail-ok' : 'ev-mail-fail'">{{ e.emailed ? '已发信' : '未发信' }}</span>
+                    </div>
+                  </div>
+                  <div v-else class="events-empty">暂无检查记录（monitor 定时运行后产生）</div>
+                </td>
+              </tr>
+            </template>
           </tbody>
         </table>
         <p v-else class="tpl-hint">暂无指标告警，先在上方添加。</p>
@@ -443,6 +513,52 @@ textarea.tpl:focus {
 }
 .alert-table .off {
   opacity: 0.45;
+}
+.alert-table .editing {
+  background: #1a1f28;
+  box-shadow: inset 2px 0 0 #f0b90b;
+}
+.events-row td {
+  background: #14181c;
+}
+.events {
+  max-height: 220px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.event {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #848e9c;
+}
+.ev-time {
+  min-width: 150px;
+}
+.ev-val {
+  min-width: 110px;
+  color: #eaecef;
+}
+.ev-hit {
+  color: #f6465d;
+  font-weight: 600;
+}
+.ev-miss {
+  color: #5e6673;
+}
+.ev-mail-ok {
+  color: #0ecb81;
+}
+.ev-mail-fail {
+  color: #f6465d;
+}
+.events-empty {
+  color: #5e6673;
+  font-size: 12px;
+  padding: 8px 0;
 }
 .btn.mini {
   padding: 3px 8px;

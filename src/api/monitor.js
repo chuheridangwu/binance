@@ -182,6 +182,10 @@ export function resetAlert(id) {
   return api(`/api/alerts/${id}/reset`, { method: 'POST' })
 }
 
+export function fetchAlertEvents(id, limit = 50) {
+  return api(`/api/alerts/${id}/events?limit=${limit}`)
+}
+
 export function previewAlert(symbol, period) {
   const q = new URLSearchParams()
   if (symbol) q.set('symbol', symbol)

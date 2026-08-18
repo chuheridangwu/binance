@@ -105,6 +105,7 @@ app.post('/api/screener', async (req, res) => {
       r3: !!req.body.r3,
       r4: !!req.body.r4,
       r5: !!req.body.r5,
+      r6: !!req.body.r6,
     }
     const mode = req.body.mode === 'all' ? 'all' : 'any'
     const month = typeof req.body.month === 'string' ? req.body.month : ''

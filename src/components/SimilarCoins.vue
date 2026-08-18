@@ -134,8 +134,10 @@ onMounted(() => {
         <thead>
           <tr>
             <th @click="sortClick('symbol')">币种</th>
-            <th @click="sortClick('similarity')">相似度</th>
-            <th @click="sortClick('retWindow')">区间涨跌</th>
+            <th @click="sortClick('similarity')">综合相似</th>
+            <th @click="sortClick('shapeCorr')">形态相关</th>
+            <th @click="sortClick('retCorr')">日收益相关</th>
+            <th @click="sortClick('retWindow')">当前区间涨跌</th>
             <th @click="sortClick('currentPrice')">现价</th>
           </tr>
         </thead>
@@ -143,11 +145,13 @@ onMounted(() => {
           <tr v-for="c in filtered" :key="c.symbol" @click="openChart(c.symbol)">
             <td class="sym">{{ c.symbol }}</td>
             <td><b class="sim">{{ fmtSimilarity(c.similarity) }}</b></td>
+            <td class="mono dim">{{ fmtSimilarity(c.shapeCorr) }}</td>
+            <td class="mono dim">{{ fmtSimilarity(c.retCorr) }}</td>
             <td><b :class="c.retWindow > 0 ? 'up' : c.retWindow < 0 ? 'down' : ''">{{ fmtPct(c.retWindow) }}</b></td>
             <td class="mono dim">{{ fmtPrice(c.currentPrice) }}</td>
           </tr>
           <tr v-if="!filtered.length && !loading">
-            <td colspan="4" class="empty">没有找到相似币（历史K线回补中或数据不足）</td>
+            <td colspan="6" class="empty">没有找到相似币（历史K线回补中或数据不足）</td>
           </tr>
         </tbody>
       </table>

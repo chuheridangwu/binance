@@ -649,10 +649,13 @@ app.get('/api/similar', async (req, res) => {
     if (targetKl.length < 10) return res.status(400).json({ error: '目标币该区间历史数据不足（需 ≥10 根日K，可能在回补中）' })
     const refRet = dailyReturns(targetKl) // {time, ret}，长度 = 目标K数 - 1
     const refLen = refRet.length
-    const refMap = new Map(refRet.map((r) => [r.time, r.ret]))
     const refWindow = { start: targetKl[0].time, end: targetKl[targetKl.length - 1].time, bars: targetKl.length }
+    // 归一化路径：从窗口起点开始累计涨跌幅（%）→ 形状对比基准
+    const t0 = targetKl[0].close
+    const targetPath = targetKl.map((k) => (t0 > 0 ? k.close / t0 - 1 : 0))
+    const targetRets = refRet.map((r) => r.ret)
 
-    // 每个候选币：取最近 refLen+1 根日K，计算收益率序列，与参考序列逐根对齐
+    // 每个候选币：取最近 refLen+1 根日K，归一化路径与目标路径逐根对比
     const prices = await binance.getFuturesPrices()
     const symbols = await binance.getPerpetualSymbols()
     const sims = []
@@ -662,18 +665,27 @@ app.get('/api/similar', async (req, res) => {
         'SELECT time, close FROM klines WHERE symbol = ? AND interval = ? ORDER BY time DESC LIMIT ?'
       ).all(sym, '1d', refLen + 1)
       if (kl.length < refLen + 1) continue
+      // 数据须回补到最近，避免用旧窗口对形态
+      const newest = kl[0].time
+      if (Date.now() - newest > 7 * 24 * 3600 * 1000) continue
       kl.reverse()
-      const candRet = dailyReturns(kl)
-      const y = candRet.map((r) => r.ret)
-      if (y.length !== refLen) continue
-      const x = refRet.map((r) => r.ret)
-      const corr = pearson(x, y)
-      if (!Number.isFinite(corr)) continue
+      const candRets = dailyReturns(kl).map((r) => r.ret)
+      if (candRets.length !== refLen) continue
+      // 归一化路径（百分比形态，可比性）
+      const c0 = kl[0].close
+      const candPath = kl.map((k) => (c0 > 0 ? k.close / c0 - 1 : 0))
+      // 路径相关：整条曲线的形态相关（先涨后跌/横盘/V型等）
+      const shapeCorr = pearson(targetPath, candPath)
+      // 日收益相关：每天涨跌方向是否一致（抗单日主导）
+      const retCorr = pearson(targetRets, candRets)
+      if (!Number.isFinite(shapeCorr) || !Number.isFinite(retCorr)) continue
       const last = kl[kl.length - 1]
       const first = kl[kl.length - 1 - refLen]
       sims.push({
         symbol: sym,
-        similarity: Math.round(corr * 1000) / 1000,
+        similarity: Math.round((0.65 * shapeCorr + 0.35 * retCorr) * 1000) / 1000,
+        shapeCorr: Math.round(shapeCorr * 1000) / 1000,
+        retCorr: Math.round(retCorr * 1000) / 1000,
         currentPrice: prices.get(sym) ?? null,
         retWindow: first.close > 0 ? round1((last.close / first.close - 1) * 100) : null,
       })

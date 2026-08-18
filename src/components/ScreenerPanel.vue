@@ -9,6 +9,7 @@ const RULES = [
   { id: 'r3', name: '价格 ≥ 布林带上轨', desc: '收盘价站上布林带 (20, 2) 上轨' },
   { id: 'r4', name: '当日 OI > 前N日总和', desc: '当日未平仓合约量大于之前 N 天 OI 之和', param: { name: 'N', min: 3, max: 7, def: 5 } },
   { id: 'r5', name: '单日量 > 前N日总和', desc: '最近一根日K成交量大于之前 N 天成交量之和', param: { name: 'N', min: 3, max: 7, def: 3 } },
+  { id: 'r6', name: 'N日内新高 + RSI 顶背离(差≥10)', desc: '近 N 天创新高，且新高处 RSI(6) 比此前另一高点 RSI(6) 低至少 10', param: { name: 'N', min: 10, max: 90, def: 30 } },
 ]
 
 const STRATEGIES = [
@@ -28,8 +29,8 @@ const BOTTOM_CONDITIONS = [
 ]
 
 const view = ref('up')
-const checked = ref({ r1: true, r2: true, r3: true, r4: true, r5: true })
-const params = ref({ r1: 7, r2: 3, r4: 5, r5: 3 })
+const checked = ref({ r1: true, r2: true, r3: true, r4: true, r5: true, r6: true })
+const params = ref({ r1: 7, r2: 3, r4: 5, r5: 3, r6: 30 })
 const mode = ref('any')
 const month = ref('')
 const minScore = ref(60)
@@ -111,7 +112,7 @@ function fmtNum(v, digits = 2) {
 
 function buildCells(row) {
   const cells = {}
-  for (const id of ['r1', 'r2', 'r3', 'r4', 'r5']) {
+  for (const id of ['r1', 'r2', 'r3', 'r4', 'r5', 'r6']) {
     cells[id] = { text: '—', hit: false, avail: false }
   }
   for (const rid of row.matched || []) {
@@ -134,6 +135,8 @@ function buildCells(row) {
       }
     } else if (rid === 'r5') {
       cells.r5 = { text: `量比 ${Number(d.ratio).toFixed(1)}x`, hit: true, avail: true }
+    } else if (rid === 'r6') {
+      cells.r6 = { text: `新高RSI ${Number(d.curRsi).toFixed(1)} < ${Number(d.prevRsi).toFixed(1)}（差${Number(d.diff).toFixed(1)}）`, hit: true, avail: true }
     }
   }
   return cells

@@ -13,6 +13,7 @@ export const RULES = [
   { id: 'r3', name: '价格 ≥ 布林带上轨', desc: '收盘价站上布林带 (20, 2) 上轨' },
   { id: 'r4', name: '当日 OI > 前N日总和', desc: '当日未平仓合约量大于之前 N 天 OI 之和', param: { name: 'N', min: 3, max: 7, def: 5 } },
   { id: 'r5', name: '单日量 > 前N日总和', desc: '最近一根日K成交量大于之前 N 天成交量之和', param: { name: 'N', min: 3, max: 7, def: 3 } },
+  { id: 'r6', name: 'N日内新高 + RSI 顶背离(差≥10)', desc: '近 N 天创新高，且新高处 RSI(6) 比此前另一高点 RSI(6) 低至少 10', param: { name: 'N', min: 10, max: 90, def: 30 } },
 ]
 
 export const RULE_DEFAULTS = {
@@ -20,6 +21,7 @@ export const RULE_DEFAULTS = {
   r2: RULES.find((r) => r.id === 'r2').param.def,
   r4: RULES.find((r) => r.id === 'r4').param.def,
   r5: RULES.find((r) => r.id === 'r5').param.def,
+  r6: RULES.find((r) => r.id === 'r6').param.def,
 }
 
 const state = { running: false, total: 0, done: 0, found: 0, errors: 0, startAt: 0, lastScanAt: 0 }
@@ -192,6 +194,50 @@ export function checkR5(klines, days = 3) {
   const last = klines[n - 1].volume
   const prevSum = klines.slice(n - days - 1, n - 1).reduce((a, k) => a + k.volume, 0)
   return { hit: prevSum > 0 && last > prevSum, volume: last, prevSum, ratio: prevSum > 0 ? last / prevSum : 0, days }
+}
+
+// r6: 近 N 天创新高，且新高处 RSI(6) 比此前另一高点 RSI(6) 低至少 10（RSI 顶背离）
+// 高点 = 窗口内局部高点（比相邻日收盘都高）。新高 = 窗口内最高价。另一高点 = 新高之前、窗口内最高价的局部高点。
+export function checkR6(klines, rsi6, days = 30) {
+  const n = klines.length
+  if (n < days + 1) return { hit: false }
+  const start = n - days
+
+  let newIdx = -1
+  let newHigh = -Infinity
+  for (let i = start; i < n; i++) {
+    if (klines[i].high > newHigh) {
+      newHigh = klines[i].high
+      newIdx = i
+    }
+  }
+
+  // 收集窗口内局部高点（峰值：比前一日收盘高、不低于后一日收盘），排除新高本身所在
+  const peaks = []
+  for (let i = start + 1; i < n - 1; i++) {
+    const prevClose = klines[i - 1].close
+    const nextClose = klines[i + 1].close
+    if (klines[i].high > prevClose && klines[i].high >= nextClose) peaks.push(i)
+  }
+
+  // 另一高点 = 新高之前的最高局部高点
+  let prevIdx = -1
+  let prevHigh = -Infinity
+  for (const i of peaks) {
+    if (i >= newIdx) continue
+    if (klines[i].high > prevHigh) {
+      prevHigh = klines[i].high
+      prevIdx = i
+    }
+  }
+
+  const curRsi = rsi6[newIdx]
+  const prevRsi = prevIdx >= 0 ? rsi6[prevIdx] : NaN
+  if (!(newHigh > prevHigh) || !Number.isFinite(curRsi) || !Number.isFinite(prevRsi)) {
+    return { hit: false, newHigh, prevHigh: prevIdx >= 0 ? prevHigh : null, curRsi, prevRsi: Number.isFinite(prevRsi) ? prevRsi : null, diff: null, days }
+  }
+  const diff = prevRsi - curRsi
+  return { hit: diff >= 10, newHigh, prevHigh, curRsi, prevRsi, diff, days }
 }
 
 /* ================= 四类策略 ================= */
@@ -492,6 +538,7 @@ export async function scanStrategies(strategies, opts = {}) {
         const kl = await getFuturesKlines(sym, '1d', 120)
         if (kl.length < 40) return
         const f = buildKlineFeatures(kl)
+        if (f.price < 0.05) return
         const listed = listingDate(sym)
         const row = {
           symbol: sym,
@@ -624,7 +671,7 @@ export async function scan(rules, mode = 'any', opts = {}) {
   if (!enabled.length) throw new Error('至少勾选一个规则')
 
   const params = {}
-  for (const rid of ['r1', 'r2', 'r4', 'r5']) {
+  for (const rid of ['r1', 'r2', 'r4', 'r5', 'r6']) {
     const meta = RULES.find((r) => r.id === rid)?.param
     const raw = Number(opts.params?.[rid])
     params[rid] = Number.isFinite(raw) ? Math.min(meta.max, Math.max(meta.min, Math.round(raw))) : meta.def
@@ -656,6 +703,8 @@ export async function scan(rules, mode = 'any', opts = {}) {
         const kl = await getFuturesKlines(sym, '1d', 100)
         if (kl.length < 40) return
         const closes = kl.map((k) => k.close)
+        const price = closes[closes.length - 1]
+        if (price < 0.05) return
         const rsi6 = rsiSeries(closes, 6)
         const listed = listingDate(sym)
         const detail = {}
@@ -695,13 +744,20 @@ export async function scan(rules, mode = 'any', opts = {}) {
             detail.r5 = r
           }
         }
+        if (rules.r6) {
+          const r = checkR6(kl, rsi6, params.r6)
+          if (r.hit) {
+            hit.push('r6')
+            detail.r6 = r
+          }
+        }
 
         if (hit.length && (mode === 'any' || hit.length === enabled.length)) {
           const curRsi6 = rsi6[rsi6.length - 1]
           results.push({
             symbol: sym,
             listed: listed ? monthKey(listed) : '',
-            price: closes[closes.length - 1],
+            price,
             matched: hit,
             detail,
             rsi6: Number.isFinite(curRsi6) ? curRsi6 : null,

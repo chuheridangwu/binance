@@ -627,33 +627,50 @@ function round1(v) {
 app.get('/api/similar', async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').toUpperCase()
-    const days = Math.min(120, Math.max(7, Number(req.query.days) || 30))
     const top = Math.min(30, Number(req.query.top) || 12)
     if (!symbol) return res.status(400).json({ error: 'symbol 必填' })
     const full = symbol.endsWith('USDT') ? symbol : symbol + 'USDT'
-    const cutoff = Date.now() - days * 24 * 3600 * 1000
-    const targetKl = mkt.prepare('SELECT time, close FROM klines WHERE symbol = ? AND interval = ? AND time >= ? ORDER BY time ASC').all(full, '1d', cutoff)
-    if (targetKl.length < 10) return res.status(400).json({ error: '目标币历史数据不足（需 ≥10 根日K，可能在回补中）' })
-    const targetRet = dailyReturns(targetKl)
-    const targetMap = new Map(targetRet.map((r) => [r.time, r.ret]))
+
+    // 参考窗口：start/end（支持 YYYY-MM-DD 或毫秒时间戳）。缺省则用最近 N 天
+    const days = Math.min(120, Math.max(7, Number(req.query.days) || 30))
+    let start = parseDayTs(req.query.start)
+    let end = parseDayTs(req.query.end)
+    if (start === null || end === null) {
+      end = Date.now()
+      start = end - days * 24 * 3600 * 1000
+    }
+    if (end <= start) return res.status(400).json({ error: '结束时间必须晚于开始时间' })
+    if (end - start > 365 * 24 * 3600 * 1000) return res.status(400).json({ error: '参考区间最长一年' })
+
+    // 目标币：参考区间 [start, end] 的日收益率序列 → 参考走势形态
+    const targetKl = mkt.prepare(
+      'SELECT time, close FROM klines WHERE symbol = ? AND interval = ? AND time >= ? AND time <= ? ORDER BY time ASC'
+    ).all(full, '1d', start, end)
+    if (targetKl.length < 10) return res.status(400).json({ error: '目标币该区间历史数据不足（需 ≥10 根日K，可能在回补中）' })
+    const refRet = dailyReturns(targetKl) // {time, ret}，长度 = 目标K数 - 1
+    const refLen = refRet.length
+    const refMap = new Map(refRet.map((r) => [r.time, r.ret]))
+    const refWindow = { start: targetKl[0].time, end: targetKl[targetKl.length - 1].time, bars: targetKl.length }
+
+    // 每个候选币：取最近 refLen+1 根日K，计算收益率序列，与参考序列逐根对齐
     const prices = await binance.getFuturesPrices()
     const symbols = await binance.getPerpetualSymbols()
     const sims = []
     for (const sym of symbols) {
       if (sym === full) continue
-      const kl = mkt.prepare('SELECT time, close FROM klines WHERE symbol = ? AND interval = ? AND time >= ? ORDER BY time ASC').all(sym, '1d', cutoff)
-      if (kl.length < 8) continue
-      const symMap = new Map(dailyReturns(kl).map((r) => [r.time, r.ret]))
-      const x = []
-      const y = []
-      for (const [t, rv] of targetMap) {
-        if (symMap.has(t)) { x.push(rv); y.push(symMap.get(t)) }
-      }
-      if (x.length < 8) continue
+      const kl = mkt.prepare(
+        'SELECT time, close FROM klines WHERE symbol = ? AND interval = ? ORDER BY time DESC LIMIT ?'
+      ).all(sym, '1d', refLen + 1)
+      if (kl.length < refLen + 1) continue
+      kl.reverse()
+      const candRet = dailyReturns(kl)
+      const y = candRet.map((r) => r.ret)
+      if (y.length !== refLen) continue
+      const x = refRet.map((r) => r.ret)
       const corr = pearson(x, y)
       if (!Number.isFinite(corr)) continue
       const last = kl[kl.length - 1]
-      const first = kl[0]
+      const first = kl[kl.length - 1 - refLen]
       sims.push({
         symbol: sym,
         similarity: Math.round(corr * 1000) / 1000,
@@ -662,11 +679,31 @@ app.get('/api/similar', async (req, res) => {
       })
     }
     sims.sort((a, b) => b.similarity - a.similarity)
-    res.json({ symbol, full, days, results: sims.slice(0, top), count: sims.length, generatedAt: Date.now() })
+    const targetFirst = targetKl[0].close
+    const targetLast = targetKl[targetKl.length - 1].close
+    res.json({
+      symbol,
+      full,
+      refWindow,
+      targetRet: targetFirst > 0 ? round1((targetLast / targetFirst - 1) * 100) : null,
+      results: sims.slice(0, top),
+      count: sims.length,
+      generatedAt: Date.now(),
+    })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
 })
+
+// 解析 YYYY-MM-DD（按 UTC 当天 0 点，对齐日K开市）或毫秒时间戳
+function parseDayTs(v) {
+  if (v === undefined || v === null || v === '') return null
+  const s = String(v).trim()
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s)
+  if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3])
+  const t = Number(s)
+  return Number.isFinite(t) && t > 0 ? t : null
+}
 
 function dailyReturns(kl) {
   const out = []

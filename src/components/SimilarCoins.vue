@@ -7,11 +7,19 @@ const loading = ref(false)
 const error = ref('')
 const results = ref([])
 const targetSymbol = ref('')
-const days = ref(30)
+const startDate = ref('')
+const endDate = ref('')
 const queriedSymbol = ref('')
+const refWindow = ref(null)
+const targetRet = ref(null)
 const generatedAt = ref(null)
 const sortKey = ref('similarity')
 const sortDir = ref(-1)
+
+function todayStr(offsetDays) {
+  const d = new Date(Date.now() - (offsetDays || 0) * 24 * 3600 * 1000)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 async function load() {
   const sym = targetSymbol.value.trim().toUpperCase()
@@ -22,9 +30,11 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const res = await fetchSimilar(sym, days.value)
+    const res = await fetchSimilar(sym, startDate.value || null, endDate.value || null)
     results.value = res.results || []
     queriedSymbol.value = res.symbol || sym
+    refWindow.value = res.refWindow || null
+    targetRet.value = res.targetRet ?? null
     generatedAt.value = res.generatedAt
   } catch (e) {
     error.value = e.message
@@ -59,6 +69,11 @@ function fmtSimilarity(v) {
   return (v * 100).toFixed(1) + '%'
 }
 
+function fmtDate(ts) {
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function fmtPct(v) {
   if (v === null || v === undefined || Number.isNaN(v)) return '—'
   const s = v > 0 ? '+' : ''
@@ -79,6 +94,8 @@ function openChart(sym) {
 }
 
 onMounted(() => {
+  endDate.value = todayStr(0)
+  startDate.value = todayStr(30)
   if (store.chartSymbol) {
     targetSymbol.value = store.chartSymbol.replace('USDT', '')
     load()
@@ -90,21 +107,24 @@ onMounted(() => {
   <div class="similar">
     <div class="head">
       <h2>相似趋势</h2>
-      <span class="note">给定一个币，用近 N 天日收益率序列的相关系数找趋势最相似的币</span>
+      <span class="note">选定一个币的时间区间（参考走势），查找当前走势与该区间最相似的币</span>
     </div>
 
     <div class="filters">
       <span class="mode-label">币种：</span>
       <input v-model="targetSymbol" class="search-input" placeholder="如 ARB / BTC / AAPL" @keyup.enter="load" />
-      <span class="mode-label">周期：</span>
-      <select v-model.number="days" class="select" :disabled="loading">
-        <option :value="14">14 天</option>
-        <option :value="30">30 天</option>
-        <option :value="60">60 天</option>
-        <option :value="90">90 天</option>
-      </select>
+      <span class="mode-label">开始时间：</span>
+      <input v-model="startDate" type="date" class="select" :disabled="loading" />
+      <span class="mode-label">结束时间：</span>
+      <input v-model="endDate" type="date" class="select" :disabled="loading" />
+      <span class="mode-label">（留空默认最近 30 天）</span>
       <button class="btn" :disabled="loading" @click="load">{{ loading ? '搜索中…' : '查找相似' }}</button>
-      <span class="note" v-if="queriedSymbol">与 <b>{{ queriedSymbol }}</b> 最相似（共 {{ results.length }} 个有数据）</span>
+      <span class="note" v-if="queriedSymbol">
+        与 <b>{{ queriedSymbol }}</b>
+        <template v-if="refWindow">{{ fmtDate(refWindow.start) }} ~ {{ fmtDate(refWindow.end) }}（{{ refWindow.bars }} 根日K）</template>
+        <template v-else>最近 {{ 30 }} 天</template>
+        最相似（共 {{ results.length }} 个有数据）
+      </span>
     </div>
 
     <div v-if="error" class="hint err">{{ error }}</div>

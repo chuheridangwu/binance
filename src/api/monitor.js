@@ -58,10 +58,11 @@ export function fetchMeme(params) {
   return api('/api/meme' + (qs ? '?' + qs : ''))
 }
 
-export function fetchSimilar(symbol, days) {
+export function fetchSimilar(symbol, start, end) {
   const q = new URLSearchParams()
   if (symbol) q.set('symbol', symbol)
-  if (days) q.set('days', String(days))
+  if (start) q.set('start', start)
+  if (end) q.set('end', end)
   return api('/api/similar?' + q.toString())
 }
 

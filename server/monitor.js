@@ -36,6 +36,15 @@ function beijingClock() {
   return { hhmm: `${hh}:${mm}`, day }
 }
 
+// 全局扫描槽序号：每天 6 个时段，跨天递增，用于判断"连续命中"
+function slotIndex(day, hhmm) {
+  const pos = SCHEDULED_SLOTS.indexOf(hhmm)
+  if (pos < 0) return -1
+  const [y, m, d] = day.split('-').map(Number)
+  const dayNo = Math.floor(Date.UTC(y, m - 1, d) / 86400000)
+  return dayNo * 6 + pos
+}
+
 async function scanScheduledDefault() {
   const { hhmm, day } = beijingClock()
   if (!SCHEDULED_SLOTS.includes(hhmm)) return
@@ -57,20 +66,25 @@ async function scanScheduledDefault() {
   const hits = (result.results || []).filter((r) => (r.matched || []).length >= 3)
   if (!hits.length) return
 
-  // 当日多次命中（跨时段重复出现）→ 重点关注标记
-  const dayKey = `sched_hits_${day}`
-  let dayHits = {}
+  // 连续 N 个扫描时段都被命中 → 重点关注标记（跨天累计）
+  const curSlot = slotIndex(day, hhmm)
+  const streakKey = 'sched_streak'
+  let streaks = {}
   try {
-    dayHits = JSON.parse(getSetting(dayKey) || '{}')
+    streaks = JSON.parse(getSetting(streakKey) || '{}')
   } catch {
-    dayHits = {}
+    streaks = {}
   }
+  const HOT_MIN_STREAK = 3
   const hot = new Set()
   for (const r of hits) {
-    dayHits[r.symbol] = (dayHits[r.symbol] || 0) + 1
-    if (dayHits[r.symbol] >= 2) hot.add(r.symbol)
+    const prev = streaks[r.symbol]
+    let count = 1
+    if (prev && prev.slot === curSlot - 1) count = (prev.count || 0) + 1
+    streaks[r.symbol] = { slot: curSlot, count }
+    if (count >= HOT_MIN_STREAK) hot.add(r.symbol)
   }
-  setSetting(dayKey, JSON.stringify(dayHits))
+  setSetting(streakKey, JSON.stringify(streaks))
 
   const rows = hits
     .map(
@@ -84,7 +98,7 @@ async function scanScheduledDefault() {
       `<p>定时默认规则扫描（北京时间 ${hhmm}）命中 ≥3 条规则的 ${hits.length} 个合约：</p>` +
         `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse">` +
         `<tr><th>币种</th><th>上架</th><th>现价</th><th>命中规则</th></tr>${rows}</table>` +
-        `<p>⭐ = 当日已在多个时段被扫描命中，重点关注的合约。🚫 = 标记为「不追踪」的合约（排在最下方）。</p>` +
+        `<p>⭐ = 连续 3 个扫描时段都被命中的合约，重点关注。🚫 = 标记为「不追踪」的合约（排在最下方）。</p>` +
         `<p>排序：命中规则数多的靠前，相同的按 RSI6 从高到低。扫描时间：${new Date().toLocaleString('zh-CN')}</p>`
     )
     state.lastEmailAt = Date.now()

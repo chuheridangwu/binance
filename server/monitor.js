@@ -53,18 +53,39 @@ async function scanScheduledDefault() {
     state.scanErrors = state.scanErrors.slice(-20)
     return
   }
-  if (!result.results.length) return
-  const rows = result.results
-    .map((r) => `<tr><td>${r.symbol}${r.muted ? ' 🚫' : ''}</td><td>${r.listed || '—'}</td><td>${r.price}</td><td>${(r.matched || []).join(', ')}</td></tr>`)
+  // 只保留命中 ≥3 条默认规则的合约
+  const hits = (result.results || []).filter((r) => (r.matched || []).length >= 3)
+  if (!hits.length) return
+
+  // 当日多次命中（跨时段重复出现）→ 重点关注标记
+  const dayKey = `sched_hits_${day}`
+  let dayHits = {}
+  try {
+    dayHits = JSON.parse(getSetting(dayKey) || '{}')
+  } catch {
+    dayHits = {}
+  }
+  const hot = new Set()
+  for (const r of hits) {
+    dayHits[r.symbol] = (dayHits[r.symbol] || 0) + 1
+    if (dayHits[r.symbol] >= 2) hot.add(r.symbol)
+  }
+  setSetting(dayKey, JSON.stringify(dayHits))
+
+  const rows = hits
+    .map(
+      (r) =>
+        `<tr><td>${r.symbol}${hot.has(r.symbol) ? ' ⭐' : ''}${r.muted ? ' 🚫' : ''}</td><td>${r.listed || '—'}</td><td>${r.price}</td><td>${(r.matched || []).join(', ')}</td></tr>`
+    )
     .join('')
   try {
     await sendMail(
-      `【选股提醒】定时扫描命中 ${rows.length} 个合约（${hhmm} 北京时间）`,
-      `<p>定时默认规则扫描（北京时间 ${hhmm}）命中 ${rows.length} 个合约：</p>` +
+      `【选股提醒】定时扫描命中 ${hits.length} 个合约（${hhmm} 北京时间）`,
+      `<p>定时默认规则扫描（北京时间 ${hhmm}）命中 ≥3 条规则的 ${hits.length} 个合约：</p>` +
         `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse">` +
         `<tr><th>币种</th><th>上架</th><th>现价</th><th>命中规则</th></tr>${rows}</table>` +
-        `<p>🚫 = 标记为「不追踪」的合约（排在最下方）。排序：命中规则数多的靠前，相同的按 RSI6 从高到低。</p>` +
-        `<p>扫描时间：${new Date().toLocaleString('zh-CN')}</p>`
+        `<p>⭐ = 当日已在多个时段被扫描命中，重点关注的合约。🚫 = 标记为「不追踪」的合约（排在最下方）。</p>` +
+        `<p>排序：命中规则数多的靠前，相同的按 RSI6 从高到低。扫描时间：${new Date().toLocaleString('zh-CN')}</p>`
     )
     state.lastEmailAt = Date.now()
     state.lastEmailTo = (getSetting('recipients') || '').split(/[,;，；\s]+/).filter(Boolean)

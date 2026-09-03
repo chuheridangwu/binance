@@ -86,10 +86,14 @@ async function scanScheduledDefault() {
   }
   setSetting(streakKey, JSON.stringify(streaks))
 
+  const ruleName = (id) => {
+    const r = screener.RULES.find((x) => x.id === id)
+    return r ? r.name : id
+  }
   const rows = hits
     .map(
       (r) =>
-        `<tr><td>${r.symbol}${hot.has(r.symbol) ? ' ⭐' : ''}${r.muted ? ' 🚫' : ''}</td><td>${r.listed || '—'}</td><td>${r.price}</td><td>${(r.matched || []).join(', ')}</td></tr>`
+        `<tr><td>${r.symbol}${hot.has(r.symbol) ? ' ⭐' : ''}${r.muted ? ' 🚫' : ''}</td><td>${r.listed || '—'}</td><td>${r.price}</td><td>${(r.matched || []).map(ruleName).join('<br/>')}</td></tr>`
     )
     .join('')
   try {

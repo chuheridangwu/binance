@@ -16,6 +16,7 @@
 
 ## 0.5 最近改动（2026-09）
 - **监控设置-指标告警错误弹窗**：`src/components/SettingsPanel.vue` 所有错误提示从底部小字 `msg` 改为**居中弹窗**（新增 `errModal`/`showErr()`，14 处 `show('err',…)` 全部迁移；`.modal-mask/.modal/.err-modal` 样式）。背景：用户填 `btc` 而非完整对 `BTCUSDT` 时后端 400 报错，底部小字提示易被忽略，看起来像"点击添加没反应"。**踩坑**：指标告警的 `createAlert`（`server/indicator_alerts.js`）校验 symbol 必须以 `USDT` 结尾（`endsWith('USDT')`），只填 `BTC`/`btc` 会报「交易对需以 USDT 结尾，如 BTCUSDT」，属预期行为，前端需用弹窗醒目提示。
+- **定时选股邮件展示规则名**：`server/monitor.js` 的 `scanScheduledDefault` 发信时，命中规则列由原来的规则 ID（`r1, r3`）改为**规则中文名**（用 `screener.RULES` 映射 `ruleName(id)`，如「RSI(6) 近N日 ≥ 80」），每条规则用 `<br/>` 换行，方便阅读。
 
 ## 1. 我们在做什么任务
 

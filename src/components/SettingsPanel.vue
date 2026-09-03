@@ -23,6 +23,11 @@ function show(type, text) {
   msg.value = { type, text }
 }
 
+const errModal = ref('')
+function showErr(text) {
+  errModal.value = text
+}
+
 async function load() {
   try {
     const [st, se] = await Promise.all([fetchStatus(), fetchSettings()])
@@ -39,7 +44,7 @@ async function load() {
       settingsLoaded.value = true
     }
   } catch (e) {
-    show('err', '加载状态失败：' + e.message)
+    showErr('加载状态失败：' + e.message)
   }
 }
 
@@ -52,7 +57,7 @@ async function onSave() {
     await load()
     show('ok', '设置已保存')
   } catch (e) {
-    show('err', '保存失败：' + e.message)
+    showErr('保存失败：' + e.message)
   } finally {
     saving.value = false
   }
@@ -65,7 +70,7 @@ async function onTest() {
     const r = await testEmail()
     show('ok', `测试邮件已发送 → ${r.to.join(', ')}`)
   } catch (e) {
-    show('err', '发送失败：' + e.message)
+    showErr('发送失败：' + e.message)
   } finally {
     testing.value = false
   }
@@ -78,13 +83,13 @@ async function onRun() {
     await load()
     show('ok', `扫描完成，共 ${r.status.totalListings} 条记录`)
   } catch (e) {
-    show('err', '扫描失败：' + e.message)
+    showErr('扫描失败：' + e.message)
   }
 }
 
 async function onChangePwd() {
   if (pwd.value.new_password !== pwd.value.confirm) {
-    show('err', '两次输入的新密码不一致')
+    showErr('两次输入的新密码不一致')
     return
   }
   pwdSaving.value = true
@@ -94,7 +99,7 @@ async function onChangePwd() {
     pwd.value = { old_password: '', new_password: '', confirm: '' }
     show('ok', '登录密码已修改，请牢记')
   } catch (e) {
-    show('err', '修改失败：' + e.message)
+    showErr('修改失败：' + e.message)
   } finally {
     pwdSaving.value = false
   }
@@ -105,13 +110,13 @@ async function loadAlerts() {
     const r = await fetchAlerts()
     alerts.value = r.alerts || []
   } catch (e) {
-    show('err', '加载指标告警失败：' + e.message)
+    showErr('加载指标告警失败：' + e.message)
   }
 }
 
 async function onAddAlert() {
   if (!alertForm.value.symbol.trim()) {
-    show('err', '请输入交易对')
+    showErr('请输入交易对')
     return
   }
   alertLoading.value = true
@@ -141,7 +146,7 @@ async function onAddAlert() {
     }
     await loadAlerts()
   } catch (e) {
-    show('err', '保存失败：' + e.message)
+    showErr('保存失败：' + e.message)
   } finally {
     alertLoading.value = false
   }
@@ -176,7 +181,7 @@ async function toggleEvents(a) {
       const r = await fetchAlertEvents(id, 50)
       alertEvents.value[id] = r.events || []
     } catch (e) {
-      show('err', '加载历史失败：' + e.message)
+      showErr('加载历史失败：' + e.message)
     }
   }
 }
@@ -186,7 +191,7 @@ async function onToggleAlert(a) {
     await updateAlert(a.id, { active: a.active ? 0 : 1 })
     a.active = a.active ? 0 : 1
   } catch (e) {
-    show('err', '切换失败：' + e.message)
+    showErr('切换失败：' + e.message)
   }
 }
 
@@ -195,7 +200,7 @@ async function onDeleteAlert(id) {
     await deleteAlert(id)
     await loadAlerts()
   } catch (e) {
-    show('err', '删除失败：' + e.message)
+    showErr('删除失败：' + e.message)
   }
 }
 
@@ -205,7 +210,7 @@ async function onResetAlert(id) {
     await loadAlerts()
     show('ok', '告警状态已重置')
   } catch (e) {
-    show('err', '重置失败：' + e.message)
+    showErr('重置失败：' + e.message)
   }
 }
 
@@ -216,7 +221,7 @@ async function onPreview() {
   try {
     preview.value = await previewAlert(alertForm.value.symbol.trim().toUpperCase(), alertForm.value.period)
   } catch (e) {
-    show('err', '查询失败：' + e.message)
+    showErr('查询失败：' + e.message)
   } finally {
     previewLoading.value = false
   }
@@ -374,6 +379,19 @@ onMounted(() => {
     </div>
 
     <div v-if="msg.text" class="msg" :class="msg.type">{{ msg.text }}</div>
+
+    <div v-if="errModal" class="modal-mask" @click.self="errModal = ''">
+      <div class="modal err-modal">
+        <div class="modal-head">
+          <h3>操作失败</h3>
+          <button class="modal-close" @click="errModal = ''">×</button>
+        </div>
+        <div class="err-body">{{ errModal }}</div>
+        <div class="modal-foot">
+          <button class="btn primary" @click="errModal = ''">知道了</button>
+        </div>
+      </div>
+    </div>
 
     <p class="tips">
       说明：后端每 60 秒自动检查币安合约是否新增交易对，同时每天拉取官方公告补全数据；当天新上线的币会通过 SMTP 自动发邮件到收件人。QQ/163 邮箱需在设置中开启 SMTP 服务并获取授权码。
@@ -645,6 +663,55 @@ textarea.tpl:focus {
 .msg.err {
   background: rgba(246, 70, 93, 0.1);
   color: #f6465d;
+}
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: #101417;
+  border: 1px solid #2b3139;
+  border-radius: 10px;
+  padding: 20px;
+  width: 420px;
+  max-width: calc(100vw - 40px);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.modal-head h3 {
+  color: #f6465d;
+  font-size: 15px;
+  margin: 0;
+}
+.modal-close {
+  background: none;
+  border: none;
+  color: #848e9c;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.modal-close:hover {
+  color: #eaecef;
+}
+.err-body {
+  margin: 14px 0 20px;
+  color: #eaecef;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-all;
+}
+.modal-foot {
+  text-align: right;
 }
 .tips {
   margin-top: 16px;

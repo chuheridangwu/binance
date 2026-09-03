@@ -14,6 +14,9 @@
 
 ---
 
+## 0.5 最近改动（2026-09）
+- **监控设置-指标告警错误弹窗**：`src/components/SettingsPanel.vue` 所有错误提示从底部小字 `msg` 改为**居中弹窗**（新增 `errModal`/`showErr()`，14 处 `show('err',…)` 全部迁移；`.modal-mask/.modal/.err-modal` 样式）。背景：用户填 `btc` 而非完整对 `BTCUSDT` 时后端 400 报错，底部小字提示易被忽略，看起来像"点击添加没反应"。**踩坑**：指标告警的 `createAlert`（`server/indicator_alerts.js`）校验 symbol 必须以 `USDT` 结尾（`endsWith('USDT')`），只填 `BTC`/`btc` 会报「交易对需以 USDT 结尾，如 BTCUSDT」，属预期行为，前端需用弹窗醒目提示。
+
 ## 1. 我们在做什么任务
 
 为币安监控面板新增并完善 **「指标选股」（Screener）** 功能。当前包含两套筛选：

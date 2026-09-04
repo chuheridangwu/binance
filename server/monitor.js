@@ -90,6 +90,17 @@ async function scanScheduledDefault() {
     const r = screener.RULES.find((x) => x.id === id)
     return r ? r.name : id
   }
+  // 本次扫描使用的规则清单（放在邮件最上方）
+  const rulesHtml = Object.keys(defaultRules)
+    .filter((id) => defaultRules[id])
+    .map((id) => {
+      const meta = screener.RULES.find((x) => x.id === id)
+      if (!meta) return `<li>${id}</li>`
+      const p = params[id] ?? meta.param?.def
+      const name = meta.param ? meta.name.replace(/近N日|前N日|N日内|前N日总和/g, (m) => m.replace(/N/g, p)) : meta.name
+      return `<li>${name}</li>`
+    })
+    .join('')
   const rows = hits
     .map(
       (r) =>
@@ -99,7 +110,9 @@ async function scanScheduledDefault() {
   try {
     await sendMail(
       `【选股提醒】定时扫描命中 ${hits.length} 个合约（${hhmm} 北京时间）`,
-      `<p>定时默认规则扫描（北京时间 ${hhmm}）命中 ≥3 条规则的 ${hits.length} 个合约：</p>` +
+      `<p>定时默认规则扫描（北京时间 ${hhmm}，匹配方式：任一满足）判定规则：</p>` +
+        `<ul>${rulesHtml}</ul>` +
+        `<p>命中 ≥3 条规则的 ${hits.length} 个合约：</p>` +
         `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse">` +
         `<tr><th>币种</th><th>上架</th><th>现价</th><th>命中规则</th></tr>${rows}</table>` +
         `<p>⭐ = 连续 3 个扫描时段都被命中的合约，重点关注。🚫 = 标记为「不追踪」的合约（排在最下方）。</p>` +

@@ -86,10 +86,6 @@ async function scanScheduledDefault() {
   }
   setSetting(streakKey, JSON.stringify(streaks))
 
-  const ruleName = (id) => {
-    const r = screener.RULES.find((x) => x.id === id)
-    return r ? r.name : id
-  }
   // 本次扫描使用的规则清单（放在邮件最上方）
   const rulesHtml = Object.keys(defaultRules)
     .filter((id) => defaultRules[id])
@@ -104,7 +100,7 @@ async function scanScheduledDefault() {
   const rows = hits
     .map(
       (r) =>
-        `<tr><td>${r.symbol}${hot.has(r.symbol) ? ' ⭐' : ''}${r.muted ? ' 🚫' : ''}</td><td>${r.listed || '—'}</td><td>${r.price}</td><td>${(r.matched || []).map(ruleName).join('<br/>')}</td></tr>`
+        `<tr><td>${r.symbol}${hot.has(r.symbol) ? ' ⭐' : ''}${r.muted ? ' 🚫' : ''}</td><td>${r.listed || '—'}</td><td>${r.price}</td><td>${(r.matched || []).map((id) => id.toUpperCase()).join(', ')}</td></tr>`
     )
     .join('')
   try {

@@ -18,6 +18,7 @@
 - **监控设置-指标告警错误弹窗**：`src/components/SettingsPanel.vue` 所有错误提示从底部小字 `msg` 改为**居中弹窗**（新增 `errModal`/`showErr()`，14 处 `show('err',…)` 全部迁移；`.modal-mask/.modal/.err-modal` 样式）。背景：用户填 `btc` 而非完整对 `BTCUSDT` 时后端 400 报错，底部小字提示易被忽略，看起来像"点击添加没反应"。**踩坑**：指标告警的 `createAlert`（`server/indicator_alerts.js`）校验 symbol 必须以 `USDT` 结尾（`endsWith('USDT')`），只填 `BTC`/`btc` 会报「交易对需以 USDT 结尾，如 BTCUSDT」，属预期行为，前端需用弹窗醒目提示。
 - **定时选股邮件展示规则名**：`server/monitor.js` 的 `scanScheduledDefault` 发信时，命中规则列由原来的规则 ID（`r1, r3`）改为**规则中文名**（用 `screener.RULES` 映射 `ruleName(id)`，如「RSI(6) 近N日 ≥ 80」），每条规则用 `<br/>` 换行，方便阅读。
 - **定时选股邮件顶部加规则清单**（2026-09 增强）：邮件 body 最上方新增 `<ul>` 列出本次扫描**实际使用的判定规则**（从 `defaultRules` 遍历，参数 N 用 `params`/`RULE_DEFAULTS` 替换到名称里，如「RSI(6) 近7日 ≥ 80」「当日 OI > 前5日总和」），下方才是命中币表格。用户反馈原来「没发规则过来」——之前只在每行命中规则列显示，未在顶部汇总；现规则清单置顶、一目了然。
+- **行内命中规则改回 R1/R2/R3**（2026-09）：定时选股邮件**表格每行**的「命中规则」列，从规则中文名改回**规则编号**（`matched` 是 `r1`→`.toUpperCase()`→`R1`，逗号分隔）；顶部规则清单仍保留中文名（含参数）。用户明确只要行内用 `R1 R2 R3`。
 
 ## 1. 我们在做什么任务
 

@@ -15,6 +15,7 @@
 ---
 
 ## 0.5 最近改动（2026-09）
+- **指标告警 RSI 预热修复**（2026-09）：`server/indicator_alerts.js` 的 `currentRsi` 原来只取 `period+1` 根日K（如 RSI(6) 只用 7 根）算 RSI，属于「冷启动」，与币安/TradingView 用上百根历史预热的 RSI 偏差很大，趋势行情中可能算到阈值以下而误发告警。现改为拉 **150 根日K** 预热（`RSI_WARMUP_BARS=150`，`RSI_MIN_WARMUP=min(max(period*8,50),150)`），缓存不足时用 `getFuturesKlines(...,{skipCache:true})` 强制刷新；`server/binance.js` 的 `getFuturesKlines` 新增 `opts.skipCache` 支持绕过缓存。**踩坑**：预热根数不能超过拉取量，否则 period=14 时 `max(14*20,50)=280>150` 会导致每分钟强制刷新一次（限流隐患），阈值需 `Math.min` 收口到 150。
 - **监控设置-指标告警错误弹窗**：`src/components/SettingsPanel.vue` 所有错误提示从底部小字 `msg` 改为**居中弹窗**（新增 `errModal`/`showErr()`，14 处 `show('err',…)` 全部迁移；`.modal-mask/.modal/.err-modal` 样式）。背景：用户填 `btc` 而非完整对 `BTCUSDT` 时后端 400 报错，底部小字提示易被忽略，看起来像"点击添加没反应"。**踩坑**：指标告警的 `createAlert`（`server/indicator_alerts.js`）校验 symbol 必须以 `USDT` 结尾（`endsWith('USDT')`），只填 `BTC`/`btc` 会报「交易对需以 USDT 结尾，如 BTCUSDT」，属预期行为，前端需用弹窗醒目提示。
 - **定时选股邮件展示规则名**：`server/monitor.js` 的 `scanScheduledDefault` 发信时，命中规则列由原来的规则 ID（`r1, r3`）改为**规则中文名**（用 `screener.RULES` 映射 `ruleName(id)`，如「RSI(6) 近N日 ≥ 80」），每条规则用 `<br/>` 换行，方便阅读。
 - **定时选股邮件顶部加规则清单**（2026-09 增强）：邮件 body 最上方新增 `<ul>` 列出本次扫描**实际使用的判定规则**（从 `defaultRules` 遍历，参数 N 用 `params`/`RULE_DEFAULTS` 替换到名称里，如「RSI(6) 近7日 ≥ 80」「当日 OI > 前5日总和」），下方才是命中币表格。用户反馈原来「没发规则过来」——之前只在每行命中规则列显示，未在顶部汇总；现规则清单置顶、一目了然。

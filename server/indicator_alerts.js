@@ -74,9 +74,16 @@ function recordEvent(a, value, hit, emailed) {
   ).run(a.id, a.symbol, a.indicator, a.period, a.threshold, a.direction, value, hit ? 1 : 0, emailed ? 1 : 0, Date.now())
 }
 
-// 计算某币的 RSI 当前值：取 period+1 根日K收盘，返回最后一个 RSI
+// 计算某币的 RSI 当前值：取足够多的日K（150 根）做 Wilder 预热后，返回最后一个 RSI。
+// 注意：之前只取 period+1 根属于「冷启动」，与币安/TradingView 用上百根历史算出的 RSI 偏差很大
+//（趋势行情中冷启动值可能明显偏低，导致误触发告警），故必须预热。
+const RSI_WARMUP_BARS = 150
+const RSI_MIN_WARMUP = (period) => Math.min(Math.max(period * 8, 50), RSI_WARMUP_BARS)
 async function currentRsi(symbol, period) {
-  const klines = await getFuturesKlines(symbol, '1d', period + 1)
+  let klines = await getFuturesKlines(symbol, '1d', RSI_WARMUP_BARS)
+  if (klines.length < RSI_MIN_WARMUP(period)) {
+    klines = await getFuturesKlines(symbol, '1d', RSI_WARMUP_BARS, { skipCache: true })
+  }
   if (klines.length < period + 1) return null
   const closes = klines.map((k) => k.close)
   const rsi = rsiSeries(closes, period)

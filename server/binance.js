@@ -156,9 +156,11 @@ setInterval(() => {
   fetchAndStoreSymbols().catch(() => {})
 }, SYMBOLS_TTL).unref?.()
 
-export async function getFuturesKlines(symbol, interval, limit = 120) {
-  const cached = readKlines(symbol, interval)
-  if (cached) return cached
+export async function getFuturesKlines(symbol, interval, limit = 120, opts = {}) {
+  if (!opts.skipCache) {
+    const cached = readKlines(symbol, interval)
+    if (cached) return cached
+  }
   try {
     const rows = await getJson(`${FUTURES}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`)
     const klines = rows.map((r) => ({

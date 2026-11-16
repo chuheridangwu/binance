@@ -1,5 +1,5 @@
 import { db } from './db.js'
-import { getFuturesKlines } from './binance.js'
+import { getFuturesKlines, getFuturesPrices } from './binance.js'
 import { rsiSeries } from './screener.js'
 import { sendMail } from './mailer.js'
 
@@ -88,7 +88,17 @@ async function currentRsi(symbol, period) {
   const closes = klines.map((k) => k.close)
   const rsi = rsiSeries(closes, period)
   const last = rsi[rsi.length - 1]
-  return Number.isFinite(last) ? last : null
+  if (!Number.isFinite(last)) return null
+  return { value: last, price: klines[klines.length - 1].close }
+}
+
+// 价格展示：大数保留 2 位，小数按量级保留有效位数
+function formatPrice(p) {
+  if (!Number.isFinite(p) || p <= 0) return '—'
+  if (p >= 1) return p.toFixed(2)
+  if (p >= 0.01) return p.toFixed(4)
+  const s = p.toFixed(8).replace(/0+$/, '')
+  return s.endsWith('.') ? `${s}0` : s
 }
 
 // 检查所有告警：逐条拉取指标、判断触发、发送邮件
@@ -97,14 +107,23 @@ export async function checkAlerts() {
   if (!alerts.length) return { checked: 0, triggered: 0 }
   let triggered = 0
   const now = Date.now()
+  // 现价优先用全市场 ticker（30 秒缓存），失败则退回日K最后一根收盘价
+  let priceMap = null
+  try {
+    priceMap = await getFuturesPrices()
+  } catch {
+    priceMap = null
+  }
   for (const a of alerts) {
-    let value = null
+    let cur = null
     try {
-      value = await currentRsi(a.symbol, a.period)
+      cur = await currentRsi(a.symbol, a.period)
     } catch {
       continue // 单条失败不影响其他
     }
-    if (value === null) continue
+    if (!cur) continue
+    const value = cur.value
+    const price = priceMap?.get(a.symbol) ?? cur.price
 
     const hit = a.direction === 'lt' ? value <= a.threshold : value >= a.threshold
 
@@ -116,6 +135,7 @@ export async function checkAlerts() {
         await sendMail(
           `【${a.indicator.toUpperCase()}告警】${a.symbol} ${a.indicator.toUpperCase()}(${a.period}) ${value.toFixed(1)}`,
           `<p><b>${a.symbol}</b> 指标触发阈值</p>` +
+            `<p>当前价格：<b>${formatPrice(price)}</b></p>` +
             `<p>指标：${a.indicator.toUpperCase()}(${a.period})</p>` +
             `<p>条件：${a.direction === 'lt' ? '≤' : '≥'} ${a.threshold}</p>` +
             `<p>当前值：<b style="color:#f6465d">${value.toFixed(2)}</b></p>` +
@@ -139,9 +159,9 @@ export async function previewAlert(symbol, period) {
   const sym = String(symbol || '').trim().toUpperCase()
   const per = Number(period) || 6
   try {
-    const value = await currentRsi(sym, per)
-    return { symbol: sym, indicator: 'rsi', period: per, value }
+    const cur = await currentRsi(sym, per)
+    return { symbol: sym, indicator: 'rsi', period: per, value: cur ? cur.value : null, price: cur ? cur.price : null }
   } catch (e) {
-    return { symbol: sym, indicator: 'rsi', period: per, value: null, error: e.message }
+    return { symbol: sym, indicator: 'rsi', period: per, value: null, price: null, error: e.message }
   }
 }

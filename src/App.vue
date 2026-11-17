@@ -3,7 +3,6 @@ import { onMounted } from 'vue'
 import KlineChart from './components/KlineChart.vue'
 import ListingsStats from './components/ListingsStats.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
-import SpreadPanel from './components/SpreadPanel.vue'
 import ScreenerPanel from './components/ScreenerPanel.vue'
 import SupplyAnalysis from './components/SupplyAnalysis.vue'
 import ListingPerformance from './components/ListingPerformance.vue'
@@ -44,7 +43,6 @@ onMounted(async () => {
         </div>
         <nav class="tabs">
           <button :class="{ active: store.activeTab === 'chart' }" @click="store.activeTab = 'chart'">行情图表</button>
-          <button :class="{ active: store.activeTab === 'spread' }" @click="store.activeTab = 'spread'">套利监控</button>
           <button :class="{ active: store.activeTab === 'screener' }" @click="store.activeTab = 'screener'">指标选股</button>
           <button :class="{ active: store.activeTab === 'stats' }" @click="store.activeTab = 'stats'">月度上新统计</button>
           <button :class="{ active: store.activeTab === 'supply' }" @click="store.activeTab = 'supply'">供应分析</button>
@@ -58,7 +56,6 @@ onMounted(async () => {
       </header>
       <main class="main">
         <KlineChart v-show="store.activeTab === 'chart'" />
-        <SpreadPanel v-show="store.activeTab === 'spread'" />
         <ScreenerPanel v-show="store.activeTab === 'screener'" />
         <ListingsStats v-show="store.activeTab === 'stats'" />
         <SupplyAnalysis v-show="store.activeTab === 'supply'" />

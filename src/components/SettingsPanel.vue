@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { fetchStatus, fetchSettings, saveSettings, testEmail, triggerMonitor, changePassword, fetchAlerts, createAlert, updateAlert, deleteAlert, resetAlert, previewAlert, fetchAlertEvents } from '../api/monitor'
 
-const form = ref({ smtp_host: '', smtp_port: '465', smtp_user: '', smtp_pass: '', recipients: '', spread_alert_enabled: false, spread_alert_threshold: 30, spread_watchlist: '' })
+const form = ref({ smtp_host: '', smtp_port: '465', smtp_user: '', smtp_pass: '', recipients: '' })
 const pwd = ref({ old_password: '', new_password: '', confirm: '' })
 const status = ref(null)
 const saving = ref(false)
@@ -38,9 +38,6 @@ async function load() {
       form.value.smtp_user = se.smtp_user || ''
       form.value.smtp_pass = ''
       form.value.recipients = se.recipients || ''
-      form.value.spread_alert_enabled = se.spread_alert_enabled === '1'
-      form.value.spread_alert_threshold = Number(se.spread_alert_threshold) || 30
-      form.value.spread_watchlist = se.spread_watchlist || ''
       settingsLoaded.value = true
     }
   } catch (e) {
@@ -52,7 +49,7 @@ async function onSave() {
   saving.value = true
   show('', '')
   try {
-    const payload = { ...form.value, spread_alert_enabled: form.value.spread_alert_enabled ? '1' : '0' }
+    const payload = { ...form.value }
     await saveSettings(payload)
     await load()
     show('ok', '设置已保存')
@@ -261,18 +258,6 @@ onMounted(() => {
           <button class="btn primary" :disabled="saving" @click="onSave">{{ saving ? '保存中…' : '保存设置' }}</button>
           <button class="btn" :disabled="testing" @click="onTest">{{ testing ? '发送中…' : '发送测试邮件' }}</button>
         </div>
-      </div>
-
-      <div class="card">
-        <h3>套利提醒</h3>
-        <label class="check"><input v-model="form.spread_alert_enabled" type="checkbox" /> 启用资金费率/价差邮件提醒</label>
-        <label>年化资金费率阈值（%，超过才提醒）
-          <input v-model.number="form.spread_alert_threshold" type="number" min="1" placeholder="如 30" />
-        </label>
-        <label>监控交易对（逗号分隔，留空用默认 Top12）
-          <input v-model="form.spread_watchlist" placeholder="BTCUSDT, ETHUSDT, SOLUSDT" />
-        </label>
-        <p class="tpl-hint">每 5 分钟扫描一次，同一币种每天最多提醒一次。正费率=多头付空头，负费率=空头付多头。</p>
       </div>
 
       <div class="card">
